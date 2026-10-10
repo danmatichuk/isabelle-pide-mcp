@@ -34,7 +34,7 @@ class Tool_Create_File extends PIDE_MCP_Tool("create_file") {
     args: JSON.Object.T,
     progress: Progress
   ): PIDE_MCP_Tool_Result =
-    PIDE_MCP_Tool_Result.result {
+    PIDE_MCP_Tool_Result.text {
       val file_path = path_arg.get(args)
       Tool_Create_File.create_file(PIDE_MCP_Util.path(file_path))
       "File created"

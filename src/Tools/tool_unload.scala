@@ -23,7 +23,7 @@ class Tool_Unload extends PIDE_MCP_Tool("unload") {
     args: JSON.Object.T,
     progress: Progress
   ): PIDE_MCP_Tool_Result =
-    PIDE_MCP_Tool_Result.result {
+    PIDE_MCP_Tool_Result.text {
       val session = PIDE_MCP_Tool_Util.running_session_param(sessions, args)
       val origins = origins_arg.get(args)
       val node_names = origins.map(session.node_name)

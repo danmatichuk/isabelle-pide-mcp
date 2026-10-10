@@ -138,7 +138,7 @@ class Tool_Edit extends PIDE_MCP_Tool("edit") {
     args: JSON.Object.T,
     progress: Progress
   ): PIDE_MCP_Tool_Result =
-    PIDE_MCP_Tool_Result.result {
+    PIDE_MCP_Tool_Result.text {
       val session = PIDE_MCP_Tool_Util.running_session_param(sessions, args)
       val node_name = PIDE_MCP_Tool_Util.origin_param(session, args)
       val mode = mode_arg.get(args)

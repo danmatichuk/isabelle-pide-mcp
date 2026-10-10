@@ -16,7 +16,7 @@ class Tool_List_Sessions extends PIDE_MCP_Tool("list_sessions") {
     args: JSON.Object.T,
     progress: Progress
   ): PIDE_MCP_Tool_Result =
-    PIDE_MCP_Tool_Result.result { sessions.state_json() }
+    PIDE_MCP_Tool_Result.text { sessions.state_json() }
 }
 
 class Tools_List_Sessions extends PIDE_MCP_Tools(new Tool_List_Sessions)

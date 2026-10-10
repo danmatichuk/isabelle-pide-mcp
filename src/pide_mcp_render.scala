@@ -76,7 +76,10 @@ object PIDE_MCP_Render {
       case _ => s"$key:" :: indent(2, lines(value))
     }
 
-  def text(json: JSON.T): String = cat_lines(lines(json))
+  def text(json: JSON.T): String = {
+    val result = cat_lines(lines(json))
+    if (result.isEmpty) "(empty)" else result
+  }
 
   /* get_state */
 

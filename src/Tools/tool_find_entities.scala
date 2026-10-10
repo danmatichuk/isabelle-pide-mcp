@@ -33,10 +33,26 @@ class Tool_Find_Entities extends PIDE_MCP_Tool("find_entities") {
     "List of origins (session-qualified theory names or file paths). If non-empty, only returns entities whose definition originates from one of these. Use this if you want to explore the entities defined by a given origin.",
     Nil)
 
+  private val format_arg = PIDE_MCP_Render.Output_Format.arg
+
+  // entries are grouped by their origin already: avoid repeating it in the text rendering
+  private def without_group_origins(json: JSON.T): String =
+    PIDE_MCP_Render.text(json match {
+      case JSON.Object(obj) => obj.map {
+        case (origin, entries: List[?]) =>
+          origin -> entries.map {
+            case JSON.Object(entry) if entry.get("origin").contains(origin) => entry - "origin"
+            case entry => entry
+          }
+        case other => other
+      }
+      case other => other
+    })
+
   def input_schema: JSON.Object.T = PIDE_MCP_Tool_Schema.input_schema(
     List(PIDE_MCP_Tool_Schema.running_session_arg, PIDE_MCP_Tool_Schema.origin_arg,
       PIDE_MCP_Tool_Schema.start_line_arg, PIDE_MCP_Tool_Schema.opt_end_line_arg,
-      snippet_lines_arg, filter_origins_arg))
+      snippet_lines_arg, filter_origins_arg, format_arg))
 
   override def annotations: Option[JSON.Object.T] = Some(JSON_Object("readOnlyHint" -> true))
 
@@ -64,7 +80,9 @@ class Tool_Find_Entities extends PIDE_MCP_Tool("find_entities") {
         session, snapshot, Some(range), snippet_lines, definition_kinds, filter_origins,
         "The definition entry has not been loaded yet. " +
           PIDE_MCP_Tool_Util.retry_soon_message)
-      PIDE_MCP_Tool_Util.with_synced(PIDE_MCP_Definition.definitions_json(definitions), synced)
+      PIDE_MCP_Render.result(format_arg.get(args),
+        PIDE_MCP_Tool_Util.with_synced(PIDE_MCP_Definition.definitions_json(definitions), synced),
+        without_group_origins)
     }
 }
 

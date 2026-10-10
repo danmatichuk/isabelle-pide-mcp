@@ -18,6 +18,10 @@ object PIDE_MCP_Tool_Result {
 
   def exn_error(exn: Throwable): PIDE_MCP_Tool_Result = Result.Error(Exn.message(exn))
 
+  // readable text as content only, without structuredContent
+  def text(body: => JSON.T): PIDE_MCP_Tool_Result =
+    result(Text(PIDE_MCP_Render.text(body)))
+
   def result(body: => JSON.T): PIDE_MCP_Tool_Result =
     Exn.result(body) match {
       case Exn.Res(value) => Result.Res(value)

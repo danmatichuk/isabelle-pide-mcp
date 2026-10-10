@@ -28,8 +28,8 @@ class Tool_Stop_Session extends PIDE_MCP_Tool("stop_session") {
       case Exn.Res(session_ids) =>
         sessions.stop_sessions(session_ids, progress) match {
           case Result.Res(stopped) =>
-            PIDE_MCP_Tool_Result.Res(
-              JSON_Object("stopped" -> stopped, "remaining" -> sessions.state_json()))
+            PIDE_MCP_Tool_Result.Res(PIDE_MCP_Tool_Result.Text(PIDE_MCP_Render.text(
+              JSON_Object("stopped" -> stopped, "remaining" -> sessions.state_json()))))
           case Result.Error(exn) => PIDE_MCP_Tool_Result.exn_error(exn)
         }
     }

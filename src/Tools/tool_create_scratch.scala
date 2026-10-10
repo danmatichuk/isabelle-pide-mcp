@@ -65,7 +65,7 @@ class Tool_Create_Scratch extends PIDE_MCP_Tool("create_scratch") {
     args: JSON.Object.T,
     progress: Progress
   ): PIDE_MCP_Tool_Result =
-    PIDE_MCP_Tool_Result.result {
+    PIDE_MCP_Tool_Result.text {
       val session = PIDE_MCP_Tool_Util.running_session_param(sessions, args)
       val name_suffix = name_suffix_arg.get(args)
       val extension = extension_arg.get(args)

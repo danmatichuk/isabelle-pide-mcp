@@ -36,7 +36,7 @@ class Tool_Read extends PIDE_MCP_Tool("read") {
       val lines_count = Line.Document(text).lines.length
       val (start_line, end_line) =
         PIDE_MCP_Tool_Util.resolve_lines(opt_start_line, opt_end_line, lines_count)
-      PIDE_MCP_Util.numbered_lines_range(text, start_line, end_line)
+      PIDE_MCP_Tool_Result.Text(PIDE_MCP_Util.numbered_lines_range(text, start_line, end_line))
     }
 }
 

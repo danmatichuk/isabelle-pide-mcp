@@ -72,7 +72,8 @@ class Tool_Start_Session extends PIDE_MCP_Tool("start_session") {
       case Exn.Res(spec) =>
         sessions.start_session(spec, progress) match {
           case Result.Res(session) =>
-            PIDE_MCP_Tool_Result.Res(JSON_Object("session" -> session.id))
+            PIDE_MCP_Tool_Result.Res(PIDE_MCP_Tool_Result.Text(
+              PIDE_MCP_Render.text(JSON_Object("session" -> session.id))))
           case Result.Error(exn) => PIDE_MCP_Tool_Result.exn_error(exn)
         }
     }
