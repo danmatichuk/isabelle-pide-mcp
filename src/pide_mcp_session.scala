@@ -183,6 +183,9 @@ class PIDE_MCP_Session private(
   private def path_node_name(path: Path): Document.Node.Name = {
     val abs = path.canonical
     resources.find_theory(abs.file).getOrElse { // session theories
+      if (abs.file.isFile && abs.get_ext.isEmpty)
+        error(s"File ${quote(abs.implode)} has no file extension, so PIDE cannot load it as a theory or ML file. " +
+          s"Theories end in .thy, ML files in .ML; create scratch files with extension ${quote(".thy")}.")
       val candidate = Document.Node.Name(abs.implode, // full path file
         theory = Thy_Header.theory_name(abs.implode))
       if (candidate.path.is_file) candidate
@@ -194,8 +197,15 @@ class PIDE_MCP_Session private(
     }
   }
 
-  def node_name(s: String): Document.Node.Name =
-    resources.find_theory_node(s).getOrElse(path_node_name(PIDE_MCP_Util.path(s)))
+  def node_name(s: String): Document.Node.Name = {
+    // names that are no theory names (e.g. paths without extension) are resolved as files
+    val theory_node = Exn.result(resources.find_theory_node(s)) match {
+      case Exn.Res(node) => node
+      case Exn.Exn(exn) if Exn.is_interrupt(exn) => throw exn
+      case Exn.Exn(_) => None
+    }
+    theory_node.getOrElse(path_node_name(PIDE_MCP_Util.path(s)))
+  }
 
   def origin(node_name: Document.Node.Name): String =
     if (node_name.is_theory) {

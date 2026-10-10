@@ -4,6 +4,8 @@ PIDE MCP NEWS -- history of user-relevant changes
 New in this PIDE MCP version
 ----------------------------
 
+* `create_scratch` with `content` says in its result when the `theory` name in the content does not match the file name (or no header is there).
+* `create_scratch`: the extension defaults to `.thy` and a missing leading dot is added (before, `create_scratch` without extension created an unloadable file). The result includes the `theory` name for the header. New argument `imports` initialises a new `.thy` file with a theory skeleton. Files without any extension now give a clear error instead of `Illegal character "/" in path element`.
 * `get_state`: `commands_limit` 0 no longer implies `detail: summary`. The default `detail` is `full` for a positive `commands_limit` and `locations` otherwise, so that `commands_limit: 0` still lists the problems. New argument `include_ml_echo` (default true; with `include_infos`) to drop the echo of top-level ML declarations. INCOMPATIBILITY.
 * `get_state` no longer lists whitespace and comment-only spans as commands (they appeared as blank entries with misleading line numbers and inflated the command counts).
 * `get_state` with `wait_seconds` also waits while the file only waits for imported theories that are still being processed (e.g. after editing an imported file), instead of returning all commands as unprocessed. The result lists such theories as `waiting_for` (with progress), also without `wait_seconds`.

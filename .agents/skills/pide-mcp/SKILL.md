@@ -68,7 +68,8 @@ Important rules (further elaborated in the sections below):
 - **Use `create_scratch` to test large changes in a scratch theory before radically changing an existing theory.**
 - **Scratch theories persist for the session**. They are deleted on session stop. You may further change and explore them once created in the course of the session.
 - Use the scratch theories to try proofs and search tools without polluting your main development. Exception: if it is just a brief exploration (e.g. calling `sledgehammer` or `find_theorems` on the currently open goals), just do it in the same theory.
-- For scratch theories, pass the imports matching your needs. Typically, it is the same imports as the ones you use for the development that you are creating a scratch theory for.
+- **`create_scratch` returns the `path` and the `theory` name.** Use the returned path as `origin` as it is: the file name is fixed (`tmp_pide_mcp_scratch_<suffix>.thy`), so do not invent your own file name. The theory header must use the returned `theory` name. The extension defaults to `.thy` (pass `.ML` for ML files, which only load through a theory).
+- For scratch theories, pass the imports matching your needs with the `imports` argument (e.g. `["Box.Seq"]`), which writes the `theory … imports … begin … end` skeleton for you; then add content with `edit`. Typically, use the same imports as the development that you are creating a scratch theory for. Without `imports`, the file is empty and you write the header yourself.
 
 **Incremental workflow** (for developing complex proofs):
 ```
