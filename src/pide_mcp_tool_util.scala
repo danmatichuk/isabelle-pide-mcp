@@ -56,26 +56,45 @@ object PIDE_MCP_Tool_Util {
   def origin_param(session: PIDE_MCP_Session, args: JSON.Object.T): Document.Node.Name =
     session.node_name(PIDE_MCP_Tool_Schema.origin_arg.get(args))
 
+  // with wait_seconds > 0, wait that long for a queued or unprocessed origin before failing
   def require_loaded_origin_snapshot(
     session: PIDE_MCP_Session,
     node_name: Document.Node.Name,
-    progress: Progress
+    progress: Progress,
+    wait_seconds: Int = 0
   ): Document.Snapshot = {
-    val snapshot =
+    val deadline = Time.now() + Time.seconds(wait_seconds)
+    var queued = false
+    def attempt(): Either[String, Document.Snapshot] =
       Exn.result { session.node_snapshot(node_name) } match {
-        case Exn.Res(snapshot) => snapshot
+        case Exn.Res(snapshot) => Right(snapshot)
         case Exn.Exn(_) =>
           if (PIDE_MCP_Util.is_loaded_dynamic(session.tip_version(progress).nodes(node_name)))
-            error(s"The origin ${quote(session.origin(node_name))} is loaded but has not been " +
-              "processed yet. " + retry_soon_message)
+            Left(s"The origin ${quote(session.origin(node_name))} is loaded but has not been " +
+              "processed yet. ")
+          else if (queued)
+            Left(s"The origin ${quote(session.origin(node_name))} is queued for loading. ")
           else {
             session.read_update_resolve(node_name, List((1, Some(0))), // pass empty range to load empty nodes
               await_stable_before_resolve = false, hide_others = false, range_context = 0,
               progress = progress)
-            error(s"The origin ${quote(session.origin(node_name))} was not loaded and has now " +
-              "been queued for loading. " + retry_soon_message)
+            queued = true
+            Left(s"The origin ${quote(session.origin(node_name))} was not loaded and has now " +
+              "been queued for loading. ")
           }
       }
+    var result = attempt()
+    while (result.isLeft && Time.now() < deadline) {
+      progress.expose_interrupt()
+      Time.seconds(0.5).sleep()
+      result = attempt()
+    }
+    val snapshot = result match {
+      case Right(snapshot) => snapshot
+      case Left(msg) =>
+        error(msg + (if (wait_seconds > 0) s"Still not ready after waiting $wait_seconds seconds. " else "") +
+          retry_soon_message)
+    }
     if (!node_name.is_theory && snapshot.commands_loading.isEmpty)
       error(s"File ${quote(session.origin(node_name))} is not loaded by any theory. " +
         "Load the containing theory first.")

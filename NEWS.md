@@ -4,6 +4,8 @@ PIDE MCP NEWS -- history of user-relevant changes
 New in this PIDE MCP version
 ----------------------------
 
+* `get_state` has a new argument `wait_seconds` to wait for files that are not loaded or processed yet.
+* `get_state` output is now compact. New arguments `detail` (`summary`, `locations`, `full`), `problems_limit`, and `source_max_lines`. Problematic commands are listed once in `problems` (with their `kinds`) instead of once per kind, and `first_problem` reports the first failing command. Command sources are truncated. The `commands_*` detail lists and `errors`/`warnings` detail lists are replaced by counts. INCOMPATIBILITY.
 * Reading or editing a theory loads its unloaded files.
 * `unload` now also unloads files of unloaded theories unless a remaining theory still loads them.
 * Add [tool\_extensions](./tool_extensions) with experimental sledgehammer tool as an example user-level tool extension.

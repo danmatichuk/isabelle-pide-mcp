@@ -45,7 +45,7 @@ Important rules (further elaborated in the sections below):
 
 ### State Synchronization
 - **All changes are immediately checked** by PIDE after edits.
-- **Do not edit files via other means** (shell, other editors) - always use MCP tools to keep PIDE state synchronized. Reading via other tools (e.g. grep) for unloaded theories for exploration (e.g. grepping the AFP) is OK.
+- **Prefer MCP tools for edits** to keep PIDE state synchronized. For a scripted rewrite of many lines, you may edit the file externally, but then `read` it afterwards to re-synchronise; dependents are then rechecked. Reading via other tools (e.g. grep) for unloaded theories for exploration (e.g. grepping the AFP) is OK.
 - **If you experience discrepancies between the PIDE state and the file's disk content, use read on the affected file to re-synchronise the content.** Such discrepancies might happen, for example, when a human user is working on the same file as you or when you didn't edit a file via PIDE but with primitive file operations.
 - **Avoid absolute file path imports for theories. Use session-qualified theory names for sessions available to you.** See `get_session_state` on how to find session qualifiers.
 - When you are told to synchronise, just re-read the file.
@@ -85,13 +85,25 @@ Final results can be written back to the original file.
 ### Querying (Proof) Context
 - **`get_state` returns structured information at any command position, including status (check it after edits), subgoals, prover messages (errors, warnings, writelns, .etc), type information for terms,...**
 - **`get_state` accepts flags to opt into some of the data**, like `include_types` (for Isabelle and ML), `include_facts` (theorems used in range), etc.
-- **Set the `get_state` commands limit** when you only care about summary information or a limited number of commands - a large number of commands may flood your context.
+- **Choose the `get_state` `detail` level.** `summary` returns counts and the first failing command (a few hundred tokens). `locations` (the default without `commands_limit`) adds one compact entry per problematic command: line range, problem kinds, first message line, no source. `full` adds sources and all messages. `commands_limit: 0` implies `summary`, a positive `commands_limit` implies `full`.
+- **Each problematic command is listed once** in `problems` with its `kinds` (`failed`, `bad`, `errors`, `warnings`, ...). `problems_limit` (default 10) caps the list but the counts stay complete. `source_max_lines` (default 5) cuts long sources.
+- **After a refactor, many commands fail as consequences of one early error.** Look at `first_problem` first: it is the first failing command in file order and usually the cause. `get_session_state` with `include_failures` gives the same per theory plus the lines of failing commands, so you can locate errors across theories without a large `get_state`.
+- `include_infos` and `include_types` / `include_facts` can enlarge `full` output considerably; use them on narrow line ranges only.
+- Use `wait_seconds` on `get_state` for a file that is not loaded yet, instead of retrying.
 - **Restrict by `start_line` / `end_line`** when you only care about a specific lemma or error - it is less verbose than scanning the whole file. But don't forget that local changes may have global effects.
 - **`find_entities` lets you explore defined entities (theorems, definitions, methods, ML terms, etc.)**.
 Moreover, you can use Isar commands if necessary, for example:
 - **`print_facts` - print all facts of the current context (named assumptions, case facts, intermediate results, locale assumptions, etc.)**
 - `find_theorems`
 - `find_consts`
+
+### When a batch build is the better tool
+- For a mechanical change across many lines where few errors are expected, or for sessions the PIDE session is not based on (e.g. a test session built on the session you are editing), `isabelle build` and grepping its `***` lines is simpler and cheap.
+- For proof debugging, goal states, `find_theorems`, and checking downstream theories, the MCP is better: it rechecks incrementally in seconds.
+- To see whether later theories are healthy while an early theory is broken, put `sorry` in (or comment out) the broken part of the early theory.
+
+### Starting a session for a project with a ROOT file
+`start_session` without arguments gives a plain `HOL` session. For a project, set `logic` to the session your edited theories build **on** (the parent session, not the session they belong to) and `dirs` to the directories containing the project's `ROOT` files, e.g. `logic: "MyParent"`, `dirs: ["/path/to/project"]`.
 
 ### Importing existing library, facts, and definitions
 - **Use `get_session_state` to get all available session directories, often containing useful library material.**
