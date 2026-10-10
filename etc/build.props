@@ -12,6 +12,7 @@ sources = \
   src/result.scala \
   src/queue_lock.scala \
   src/pide_mcp_progress.scala \
+  src/pide_mcp_render.scala \
   src/progress_task.scala \
   src/pide_mcp_server.scala \
   src/pide_mcp_session.scala \

@@ -151,6 +151,7 @@ class Tool_Get_Session_State extends PIDE_MCP_Tool("get_session_state") {
       "and the line numbers of failing commands (capped at 20). The first failure is usually the cause of the later ones. " +
       "Use this to locate errors before calling `get_state` on a narrow line range. Costs a pass over each theory.",
     false)
+  private val format_arg = PIDE_MCP_Render.Output_Format.arg
   private val include_loaded_theories_arg = PIDE_MCP_Tool_Arg.bool_default(
     "include_loaded_theories", "List loaded theories per session.", false)
   private val include_session_dirs_arg = PIDE_MCP_Tool_Arg.bool_default(
@@ -175,7 +176,7 @@ class Tool_Get_Session_State extends PIDE_MCP_Tool("get_session_state") {
     List(PIDE_MCP_Tool_Schema.running_sessions_arg, filter_origins_arg,
       include_commands_running_arg, include_theory_status_arg, include_failures_arg,
       include_loaded_theories_arg,
-      include_session_dirs_arg, include_options_arg, include_statistics_arg))
+      include_session_dirs_arg, include_options_arg, include_statistics_arg, format_arg))
 
   override def annotations: Option[JSON.Object.T] = Some(JSON_Object("readOnlyHint" -> true))
 
@@ -235,10 +236,12 @@ class Tool_Get_Session_State extends PIDE_MCP_Tool("get_session_state") {
             .map(stats => Tool_Get_Session_State.ml_stats_json(List(stats)))
             .getOrElse(JSON_Object("note" -> "no ML statistics reported yet")))
       }
-      JSON_Object("sessions" -> session_states) ++
-        JSON_Object.if_proper(include_statistics,
-          Tool_Get_Session_State.ml_stats_json(session_statistics.values.toList) ++
-            Tool_Get_Session_State.jvm_stats_json())
+      PIDE_MCP_Render.result(format_arg.get(args),
+        JSON_Object("sessions" -> session_states) ++
+          JSON_Object.if_proper(include_statistics,
+            Tool_Get_Session_State.ml_stats_json(session_statistics.values.toList) ++
+              Tool_Get_Session_State.jvm_stats_json()),
+        PIDE_MCP_Render.text)
     }
 }
 

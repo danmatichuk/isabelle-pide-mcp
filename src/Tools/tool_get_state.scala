@@ -56,6 +56,7 @@ class Tool_Get_State extends PIDE_MCP_Tool("get_state") {
       "You know the file and the line numbers, so the first lines suffice to identify a command.",
     PIDE_MCP_Command.State.default_source_max_lines, minimum = Some(1))
 
+  private val format_arg = PIDE_MCP_Render.Output_Format.arg
   private val wait_seconds_arg = PIDE_MCP_Tool_Arg.int_default(
     "wait_seconds",
     "If the file is not loaded or not processed yet, wait up to this many seconds for it instead of failing right away. " +
@@ -67,7 +68,7 @@ class Tool_Get_State extends PIDE_MCP_Tool("get_state") {
       PIDE_MCP_Tool_Schema.opt_start_line_arg, PIDE_MCP_Tool_Schema.opt_end_line_arg,
       include_types_arg, include_facts_arg, include_infos_arg, include_full_markup_arg,
       commands_limit_arg, detail_arg, problems_limit_arg, source_max_lines_arg,
-      wait_seconds_arg))
+      wait_seconds_arg, format_arg))
 
   override def annotations: Option[JSON.Object.T] = Some(JSON_Object("readOnlyHint" -> true))
 
@@ -99,8 +100,10 @@ class Tool_Get_State extends PIDE_MCP_Tool("get_state") {
         case Some(_) => PIDE_MCP_Command.State.Detail.full
         case None => PIDE_MCP_Command.State.Detail.locations
       })
-      PIDE_MCP_Command.State.states_json(
-        states, doc, opts, detail, commands_limit, problems_limit_arg.get(args))
+      PIDE_MCP_Render.result(format_arg.get(args),
+        PIDE_MCP_Command.State.states_json(
+          states, doc, opts, detail, commands_limit, problems_limit_arg.get(args)),
+        PIDE_MCP_Render.get_state_text)
     }
 }
 

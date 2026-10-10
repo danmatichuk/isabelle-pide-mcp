@@ -88,7 +88,15 @@ object PIDE_MCP_Protocol {
   def text_content(text: String): JSON.Object.T =
     JSON_Object("type" -> "text", "text" -> text)
 
-  def tool_result(result: JSON.T, is_error: Boolean = false): JSON.Object.T = {
+  def tool_result(result: JSON.T, is_error: Boolean = false): JSON.Object.T =
+    result match {
+      case PIDE_MCP_Tool_Result.Text(text) =>
+        JSON_Object("content" -> List(text_content(text))) ++
+          JSON.optional("isError" -> Option.when(is_error)(true))
+      case _ => structured_tool_result(result, is_error)
+    }
+
+  private def structured_tool_result(result: JSON.T, is_error: Boolean): JSON.Object.T = {
     val structured = result match {
       case JSON.Object(obj) => obj
       case _ => JSON_Object("result" -> result)

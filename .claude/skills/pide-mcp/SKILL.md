@@ -89,6 +89,8 @@ Final results can be written back to the original file.
 - **Each problematic command is listed once** in `problems` with its `kinds` (`failed`, `bad`, `errors`, `warnings`, ...). `problems_limit` (default 10) caps the list but the counts stay complete. `source_max_lines` (default 5) cuts long sources.
 - **After a refactor, many commands fail as consequences of one early error.** Look at `first_problem` first: it is the first failing command in file order and usually the cause. `get_session_state` with `include_failures` gives the same per theory plus the lines of failing commands, so you can locate errors across theories without a large `get_state`.
 - `include_infos` and `include_types` / `include_facts` can enlarge `full` output considerably; use them on narrow line ranges only.
+- `get_state` and `get_session_state` return compact readable text by default; `format: json` returns structured JSON instead.
+- **If a result exceeds the client's output limit,** Claude Code saves it to a file and tells you so. For the default text format, `grep` that file or `Read` it in line chunks. A `jq` suggestion only applies to `format: json`. Prefer a narrower line range, `detail: locations` or `summary`, or a smaller `problems_limit` over reading a huge result.
 - Use `wait_seconds` on `get_state` for a file that is not loaded yet, instead of retrying.
 - **Restrict by `start_line` / `end_line`** when you only care about a specific lemma or error - it is less verbose than scanning the whole file. But don't forget that local changes may have global effects.
 - **`find_entities` lets you explore defined entities (theorems, definitions, methods, ML terms, etc.)**.

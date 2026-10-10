@@ -13,6 +13,9 @@ type PIDE_MCP_Tool_Result = Result[JSON.T, JSON.T]
 object PIDE_MCP_Tool_Result {
   export Result.{Res, Error}
 
+  // rendered text: returned as content only, without structured content
+  sealed case class Text(text: String)
+
   def exn_error(exn: Throwable): PIDE_MCP_Tool_Result = Result.Error(Exn.message(exn))
 
   def result(body: => JSON.T): PIDE_MCP_Tool_Result =
