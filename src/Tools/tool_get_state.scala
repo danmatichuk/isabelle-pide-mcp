@@ -32,7 +32,7 @@ class Tool_Get_State extends PIDE_MCP_Tool("get_state") {
   private val commands_limit_arg = PIDE_MCP_Tool_Arg.opt_int(
     "commands_limit",
     "Maximum number of commands to return in the plain commands list (`full` detail only). Omit to return all commands. " +
-      "**Set to 0 whenever you only want to get summary information (e.g. to see if there are any errors, warnings, etc.).** " +
+      "Set to 0 to omit the plain commands list; the problems are still listed according to `detail` (use `detail: summary` for counts only). " +
       "Note that the returned summary will count all commands, even the truncated ones. " +
       "Warning: for large ranges, there are thousands of commands that may flood your context. Set the commands limit to 0 if you do not need details.",
     minimum = Some(0))
@@ -44,7 +44,8 @@ class Tool_Get_State extends PIDE_MCP_Tool("get_state") {
       "`locations`: additionally one compact entry per problematic command (line range, problem kinds, first message line, no source). " +
       "`full`: full command details (source, all messages) for problematic commands and for the plain commands list. " +
       "Each problematic command appears once, with its problem kinds listed. " +
-      "Default: `summary` if `commands_limit` is 0, `full` if `commands_limit` is positive, and `locations` otherwise.",
+      "Default: `full` if `commands_limit` is positive, `locations` otherwise (in particular for `commands_limit` 0). " +
+      "`commands_limit` never hides the messages of listed problems; only `detail` and `problems_limit` do.",
     PIDE_MCP_Command.State.Detail.format)
   private val problems_limit_arg = PIDE_MCP_Tool_Arg.int_default(
     "problems_limit",
@@ -57,10 +58,23 @@ class Tool_Get_State extends PIDE_MCP_Tool("get_state") {
       "You know the file and the line numbers, so the first lines suffice to identify a command.",
     PIDE_MCP_Command.State.default_source_max_lines, minimum = Some(1))
 
+  private val include_ml_echo_arg = PIDE_MCP_Tool_Arg.bool_default(
+    "include_ml_echo",
+    "With `include_infos`: keep the echo of top-level ML declarations (`val x = ...`, `structure ...`, etc.). " +
+      "Set to false to see only explicit output (`writeln`, ...). Detected heuristically by the message's first words.",
+    true)
+  private val info_max_lines_arg = PIDE_MCP_Tool_Arg.int_default(
+    "info_max_lines",
+    "Maximum number of lines per writeln/information/tracing message with `include_infos`; longer ones are cut with a marker. " +
+      "ML top-level bindings echo their values, which can be very long.",
+    PIDE_MCP_Command.State.default_info_max_lines, minimum = Some(1))
+
   private val format_arg = PIDE_MCP_Render.Output_Format.arg
   private val wait_seconds_arg = PIDE_MCP_Tool_Arg.int_default(
     "wait_seconds",
     "If the file is not loaded or not processed yet, wait up to this many seconds for it instead of failing right away. " +
+      "This also waits while the file only waits for imported theories that are still being processed (e.g. after editing an imported file); " +
+      "the result then lists them as `waiting_for`. " +
       "Use this after the first request for a file to save a round trip.",
     0, minimum = Some(0), maximum = Some(600))
 
@@ -68,7 +82,7 @@ class Tool_Get_State extends PIDE_MCP_Tool("get_state") {
     List(PIDE_MCP_Tool_Schema.running_session_arg, PIDE_MCP_Tool_Schema.origin_arg,
       PIDE_MCP_Tool_Schema.opt_start_line_arg, PIDE_MCP_Tool_Schema.opt_end_line_arg,
       include_types_arg, include_facts_arg, include_infos_arg, include_full_markup_arg,
-      commands_limit_arg, detail_arg, problems_limit_arg, source_max_lines_arg,
+      commands_limit_arg, detail_arg, problems_limit_arg, source_max_lines_arg, info_max_lines_arg, include_ml_echo_arg,
       wait_seconds_arg, format_arg))
 
   override def annotations: Option[JSON.Object.T] = Some(JSON_Object("readOnlyHint" -> true))
@@ -82,9 +96,11 @@ class Tool_Get_State extends PIDE_MCP_Tool("get_state") {
       val session = PIDE_MCP_Tool_Util.running_session_param(sessions, args)
       val node_name = PIDE_MCP_Tool_Util.origin_param(session, args)
       val synced = PIDE_MCP_Tool_Util.sync_disk_edits(session, progress)
-      val snapshot =
-        PIDE_MCP_Tool_Util.require_loaded_origin_snapshot(
-          session, node_name, progress, wait_seconds_arg.get(args))
+      val wait_seconds = wait_seconds_arg.get(args)
+      val loaded_snapshot =
+        PIDE_MCP_Tool_Util.require_loaded_origin_snapshot(session, node_name, progress, wait_seconds)
+      val (snapshot, waiting) = PIDE_MCP_Tool_Util.await_upstream(
+        session, node_name, loaded_snapshot, wait_seconds, progress)
       val opt_start_line = PIDE_MCP_Tool_Schema.opt_start_line_arg.get(args)
       val opt_end_line = PIDE_MCP_Tool_Schema.opt_end_line_arg.get(args)
       val doc = Line.Document(snapshot.node.source)
@@ -93,20 +109,21 @@ class Tool_Get_State extends PIDE_MCP_Tool("get_state") {
       val opts = PIDE_MCP_Command.State.Options(
         include_types_arg.get(args), include_facts_arg.get(args),
         include_infos_arg.get(args), include_full_markup_arg.get(args),
-        source_max_lines_arg.get(args))
+        source_max_lines_arg.get(args), info_max_lines_arg.get(args), include_ml_echo_arg.get(args))
       val commands_limit = commands_limit_arg.get(args)
       val range = PIDE_MCP_Util.text_range(doc, start_line, end_line).get
       val states = PIDE_MCP_Command.State.states(snapshot, Some(range))
       val detail = detail_arg.get(args).getOrElse(commands_limit match {
-        case Some(0) => PIDE_MCP_Command.State.Detail.summary
-        case Some(_) => PIDE_MCP_Command.State.Detail.full
-        case None => PIDE_MCP_Command.State.Detail.locations
+        case Some(limit) if limit > 0 => PIDE_MCP_Command.State.Detail.full
+        case _ => PIDE_MCP_Command.State.Detail.locations
       })
       PIDE_MCP_Render.result(format_arg.get(args),
-        PIDE_MCP_Tool_Util.with_synced(
-          PIDE_MCP_Command.State.states_json(
-            states, doc, opts, detail, commands_limit, problems_limit_arg.get(args)),
-          synced),
+        PIDE_MCP_Tool_Util.with_waiting(
+          PIDE_MCP_Tool_Util.with_synced(
+            PIDE_MCP_Command.State.states_json(
+              states, doc, opts, detail, commands_limit, problems_limit_arg.get(args)),
+            synced),
+          waiting),
         PIDE_MCP_Render.get_state_text)
     }
 }

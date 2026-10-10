@@ -144,10 +144,30 @@ object PIDE_MCP_Command {
 
   def message_entries(
     elements: Iterator[XML.Elem],
-    kinds: List[String]
+    kinds: List[String],
+    max_lines: Option[Int] = None
   ): List[Option[JSON.Object.Entry]] = {
     val texts = classify_results(elements)
-    kinds.map(kind => texts.get(kind).map(kind -> _))
+    kinds.map(kind => texts.get(kind).map { messages =>
+      // datatype and similar commands print one `consts` block per generated constant (typerep_, random_, ...)
+      val shown = if (kind == "writeln" && max_lines.nonEmpty) collapse_consts(messages) else messages
+      kind -> max_lines.fold(shown)(n => shown.map(truncate_lines(_, n)))
+    })
+  }
+
+  private val collapse_consts_threshold = 3
+
+  def collapse_consts(messages: List[String]): List[String] = {
+    val aux = messages.count(_.startsWith("consts"))
+    if (aux < collapse_consts_threshold) messages
+    else {
+      var first = true
+      messages.flatMap { m =>
+        if (!m.startsWith("consts")) List(m)
+        else if (first) { first = false; List(s"($aux `consts` messages of generated constants omitted)") }
+        else Nil
+      }
+    }
   }
 
   private def classify_results(elements: Iterator[XML.Elem]): Map[String, List[String]] =
@@ -162,12 +182,44 @@ object PIDE_MCP_Command {
       else None
     }.toList.groupMap(_._1)(_._2)
 
+  // the first informative line of a message: headers like "ML error:" continue with the next line
+  def message_line(text: String): String =
+    text.linesIterator.map(_.trim).filter(_.nonEmpty).toList match {
+      case header :: next :: _ if header.endsWith(":") => header + " " + next
+      case line :: _ => line
+      case Nil => ""
+    }
+
+  // first informative line of the first message, marking how much of all messages it leaves out
+  def message_summary(messages: List[String]): Option[String] =
+    messages.headOption.map { first =>
+      def lines(text: String): List[String] = text.linesIterator.map(_.trim).filter(_.nonEmpty).toList
+      val used = lines(first) match {
+        case header :: _ :: _ if header.endsWith(":") => 2
+        case _ => 1
+      }
+      val more = messages.map(lines(_).length).sum - used
+      message_line(first) + (if (more > 0) s" (+$more more lines, see detail: full)" else "")
+    }
+
+  // the echo of top-level ML declarations, e.g. "val x = 1: int" (a heuristic: it is plain writeln output)
+  private val ml_echo = """(?s)\s*(val|structure|signature|functor|exception|type|eqtype|datatype)\s.*""".r
+  def is_ml_echo(elem: XML.Elem): Boolean =
+    Protocol.is_writeln(elem) &&
+      ml_echo.matches(PIDE_MCP_Util.elem_body_plain_text(elem).linesIterator.nextOption().getOrElse(""))
+
+  def truncate_lines(text: String, max_lines: Int): String = {
+    val lines = text.linesIterator.toList
+    if (lines.length <= max_lines) text
+    else (lines.take(max_lines) :+ s"... (+${lines.length - max_lines} lines)").mkString("\n")
+  }
+
   object State {
     def commands(snapshot: Document.Snapshot, range: Option[Text.Range]): Iterator[State] =
-      iterator(snapshot, range).map { case (cmd, command_start) =>
-        val restricted = PIDE_MCP_Util.intersect_range(cmd.range + command_start, range)
-        State(snapshot, cmd, restricted,
-          results(snapshot, cmd, command_start, restricted).toList)
+      iterator(snapshot, range).filterNot(_._1.is_ignored).map { case (cmd, command_start) =>
+        val full = cmd.range + command_start
+        val restricted = PIDE_MCP_Util.intersect_range(full, range)
+        State(snapshot, cmd, restricted, results(snapshot, cmd, command_start, full).toList, full)
       }
 
     def command_spans(
@@ -176,16 +228,20 @@ object PIDE_MCP_Command {
       range: Option[Text.Range]
     ): Iterator[State] =
       snapshot.command_spans(PIDE_MCP_Util.restrict_text_range(snapshot.node.source, range))
-        .iterator.map { span =>
+        .iterator.filterNot(span =>
+          PIDE_MCP_Util.is_ignored_source(span.range.substring(snapshot.node.source))).map { span =>
           val restricted = PIDE_MCP_Util.intersect_range(span.range, range)
           State(snapshot, theory_cmd, restricted,
-            Rendering.text_messages(snapshot, restricted).map(_.info))
+            Rendering.text_messages(snapshot, span.range).map(_.info), span.range)
         }
 
     def blob(snapshot: Document.Snapshot, range: Option[Text.Range]): Option[State] =
       snapshot.commands_loading.headOption.map { cmd =>
         val restricted = PIDE_MCP_Util.restrict_text_range(snapshot.node.source, range)
-        State(snapshot, cmd, restricted, results(snapshot, cmd, 0, restricted).toList)
+        val whole = PIDE_MCP_Util.restrict_text_range(snapshot.node.source, None)
+        State(snapshot, cmd, restricted, results(snapshot, cmd, 0, restricted).toList, restricted,
+          if (restricted == whole) Nil
+          else results(snapshot, cmd, 0, whole).filter(Protocol.is_error).toList)
       }
 
     def states(snapshot: Document.Snapshot, range: Option[Text.Range]): Iterator[State] =
@@ -207,6 +263,7 @@ object PIDE_MCP_Command {
     }
 
     val default_source_max_lines: Int = 5
+    val default_info_max_lines: Int = 30
     val default_problems_limit: Int = 10
 
     def states_json(
@@ -235,7 +292,7 @@ object PIDE_MCP_Command {
         val problem_kinds = state.problem_kinds
         if (problem_kinds.nonEmpty) {
           problems += 1
-          if (first_problem.isEmpty && problem_kinds.exists(Set(Status.failed, "errors")))
+          if (first_problem.isEmpty && problem_kinds.exists(Set(Status.failed, "errors", "errors_outside_range")))
             first_problem = Some(state.location_json(doc, problem_kinds))
           if (detail != Detail.summary && problems <= problems_limit) {
             returned_problems += (
@@ -264,21 +321,25 @@ object PIDE_MCP_Command {
       include_facts: Boolean = false,
       include_infos: Boolean = false,
       include_full_markup: Boolean = false,
-      source_max_lines: Int = default_source_max_lines
+      source_max_lines: Int = default_source_max_lines,
+      info_max_lines: Int = default_info_max_lines,
+      include_ml_echo: Boolean = true
     )
   }
 
   sealed case class State private(
     snapshot: Document.Snapshot,
     cmd: Command,
-    range: Text.Range,
-    results: List[XML.Elem]
+    range: Text.Range, // requested part of the command, for types, facts, and markup
+    results: List[XML.Elem],
+    command_range: Text.Range, // the whole command, for status, messages, and source
+    outside_errors: List[XML.Elem] = Nil // errors outside the requested range of a file-wide command
   ) {
     lazy val cmd_status: Document_Status.Command_Status =
       PIDE_MCP_Command.status(snapshot, cmd)
 
     private def has_markup(elements: Markup.Elements): Boolean =
-      snapshot.select(range, elements, _ => { case _ => Some(()) }).nonEmpty
+      snapshot.select(command_range, elements, _ => { case _ => Some(()) }).nonEmpty
 
     lazy val status: List[String] =
       status_list(cmd_status).filter {
@@ -289,7 +350,7 @@ object PIDE_MCP_Command {
     lazy val timing_ms: Long = cmd_status.timings.sum(Date.now()).ms
     lazy val errors: Int = results.count(Protocol.is_error)
     lazy val warnings: Int = results.count(Protocol.is_warning_or_legacy)
-    lazy val bad: List[JSON.Object.T] = bad_json(snapshot, range)
+    lazy val bad: List[JSON.Object.T] = bad_json(snapshot, command_range)
 
     // the problem kinds of this command: relevant status flags, bad, errors, warnings
     lazy val problem_kinds: List[String] =
@@ -297,23 +358,36 @@ object PIDE_MCP_Command {
         List(
           Option.when(bad.nonEmpty)("bad"),
           Option.when(errors > 0)("errors"),
+          Option.when(outside_hint.nonEmpty)("errors_outside_range"),
           Option.when(warnings > 0)("warnings")).flatten
 
-    private def source_text: String = range.substring(snapshot.node.source).stripLineEnd
+    // errors of a file (one command) that lie outside the requested lines
+    lazy val outside_hint: Option[String] =
+      Option.when(errors == 0 && outside_errors.nonEmpty)(
+        s"${outside_errors.length} error(s) elsewhere in the file, outside the requested lines, first: " +
+          message_line(PIDE_MCP_Util.elem_body_plain_text(outside_errors.head)))
 
-    private def first_message(max_length: Int = 200): Option[String] = {
+    private def source_text: String = command_range.substring(snapshot.node.source).stripLineEnd
+
+    private def first_message(max_length: Int = 300): Option[String] = {
       def texts(pred: XML.Elem => Boolean) =
-        results.iterator.filter(pred).map(PIDE_MCP_Util.elem_body_plain_text)
-      texts(Protocol.is_error).nextOption()
-        .orElse(texts(Protocol.is_warning_or_legacy).nextOption())
-        .orElse(bad.headOption.flatMap(_.get("message")).collect { case s: String => s })
-        .map(_.linesIterator.nextOption().getOrElse("").trim)
-        .map(line => if (line.length > max_length) line.take(max_length) + "..." else line)
+        results.iterator.filter(pred).map(PIDE_MCP_Util.elem_body_plain_text).toList
+      message_summary(texts(Protocol.is_error))
+        .orElse(message_summary(texts(Protocol.is_warning_or_legacy)))
+        .orElse(bad.headOption.flatMap(_.get("message")).collect { case s: String => message_line(s) })
+        .orElse(outside_hint)
+        .map(line =>
+          if (line.length <= max_length) line
+          else {  // cut at a word boundary
+            val cut = line.take(max_length)
+            val at = cut.lastIndexWhere(_.isWhitespace)
+            (if (at > max_length / 2) cut.take(at) else cut) + "..."
+          })
     }
 
     // compact entry without source text
     def location_json(doc: Line.Document, kinds: List[String]): JSON.Object.T = {
-      val line = doc.position(range.start).line1
+      val line = doc.position(command_range.start).line1
       val end_line = line + Line.logical_lines(source_text).length - 1
       JSON_Object.flatten(List(
         Some("line" -> line),
@@ -323,7 +397,7 @@ object PIDE_MCP_Command {
     }
 
     def json(doc: Line.Document, opts: State.Options): JSON.Object.T = {
-      val source_line = doc.position(range.start).line1
+      val source_line = doc.position(command_range.start).line1
       val source_lines = Line.logical_lines(source_text)
       val source =
         if (source_lines.length > opts.source_max_lines)
@@ -335,6 +409,7 @@ object PIDE_MCP_Command {
           Some("status" -> status),
           Some("timing_ms" -> timing_ms),
           Some("source" -> source),
+          outside_hint.map("hint" -> _),
           proper_list(bad).map("bad" -> _)) :::
         message_entries(results.iterator, Message_Kind.important) :::
         List(
@@ -342,7 +417,10 @@ object PIDE_MCP_Command {
             proper_list(types_json(snapshot, range)).map("types" -> _)).flatten,
           Option.when(opts.include_facts)(
             proper_list(facts_json(snapshot, range)).map("facts" -> _)).flatten) :::
-        (if (opts.include_infos) message_entries(results.iterator, Message_Kind.info) else Nil) :::
+        (if (opts.include_infos)
+          message_entries(
+            results.iterator.filter(elem => opts.include_ml_echo || !is_ml_echo(elem)),
+            Message_Kind.info, Some(opts.info_max_lines)) else Nil) :::
         List(
           Option.when(opts.include_full_markup)(
             "markup" -> markup_json(snapshot, range, Markup.Elements.full)))

@@ -156,6 +156,63 @@ object PIDE_MCP_Tool_Util {
     else None
   }
 
+  // loaded theories imported (transitively) by node_name that are still being processed
+  def upstream_pending(
+    session: PIDE_MCP_Session,
+    snapshot: Document.Snapshot,
+    node_name: Document.Node.Name
+  ): List[PIDE_MCP_Theory.Status] = {
+    val nodes = snapshot.version.nodes
+    @scala.annotation.tailrec
+    def closure(todo: List[Document.Node.Name], seen: Set[Document.Node.Name]): Set[Document.Node.Name] =
+      todo match {
+        case Nil => seen
+        case name :: rest =>
+          if (seen(name)) closure(rest, seen) else closure(nodes(name).header.imports ::: rest, seen + name)
+      }
+    val upstream = closure(nodes(node_name).header.imports, Set.empty).toList.filter(name =>
+      name.is_theory && !session.is_base_session_theory(name) &&
+      PIDE_MCP_Util.is_loaded_dynamic(nodes(name)))
+    PIDE_MCP_Theory.Status.statuses(session, snapshot, upstream)
+      .filter(_.overall_status == Document_Status.Overall_Status.pending)
+  }
+
+  /* A theory is waiting if none of its commands runs yet because upstream theories are still being
+     processed (e.g. after an edit of an imported file). With wait_seconds > 0, wait for that to end.
+     Returns the latest snapshot and the upstream theories that the node is still waiting for. */
+  def await_upstream(
+    session: PIDE_MCP_Session,
+    node_name: Document.Node.Name,
+    snapshot: Document.Snapshot,
+    wait_seconds: Int,
+    progress: Progress
+  ): (Document.Snapshot, List[PIDE_MCP_Theory.Status]) =
+    if (!node_name.is_theory) (snapshot, Nil)
+    else {
+      def is_waiting(snapshot: Document.Snapshot): Boolean = {
+        val status = PIDE_MCP_Theory.Status.statuses(session, snapshot, List(node_name)).head.node_status
+        status.unprocessed > 0 && status.running == 0
+      }
+      val deadline = Time.now() + Time.seconds(wait_seconds)
+      var current = snapshot
+      var upstream = upstream_pending(session, current, node_name)
+      while (upstream.nonEmpty && is_waiting(current) && Time.now() < deadline) {
+        progress.expose_interrupt()
+        Time.seconds(0.5).sleep()
+        current = session.node_snapshot(node_name)
+        upstream = upstream_pending(session, current, node_name)
+      }
+      (current, if (is_waiting(current)) upstream else Nil)
+    }
+
+  def with_waiting(
+    json: JSON.Object.T,
+    waiting: List[PIDE_MCP_Theory.Status]
+  ): JSON.Object.T =
+    json ++ JSON.optional("waiting_for" -> proper_list(waiting.map(status => JSON_Object(
+      "origin" -> status.origin,
+      "percentage_commands_processed" -> status.node_status.percentage))))
+
   def with_synced(
     json: JSON.Object.T,
     synced: Option[JSON.Object.T]

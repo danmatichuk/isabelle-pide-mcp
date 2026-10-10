@@ -41,6 +41,10 @@ object PIDE_MCP_Util {
         .getOrElse(error(
           s"Bad line range $start_line..$end_line (file has ${doc.lines.length} lines)")) })
 
+  // only whitespace and comments: such spans are no commands and have no content to report
+  def is_ignored_source(text: String): Boolean =
+    Token.explode(Keyword.Keywords.empty, text).forall(_.is_ignored)
+
   def numbered_line(line: Int, text: String): String =
     s"${line}: ${text}"
 

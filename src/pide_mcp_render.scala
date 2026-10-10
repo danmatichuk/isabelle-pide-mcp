@@ -155,7 +155,11 @@ object PIDE_MCP_Render {
             s"[sync diff]($path). Do not read the file."
         })
     }
-    cat_lines(header :: synced ::: first.getOrElse(Nil) ::: section("problems", "problems") :::
+    val waiting = list(state.getOrElse("waiting_for", Nil)).map(obj).map(w =>
+      s"${scalar(w.getOrElse("origin", "?"))} (${scalar(w.getOrElse("percentage_commands_processed", 0))}%)")
+    val waiting_line = Option.when(waiting.nonEmpty)(
+      "waiting for imported theories still being processed: " + waiting.mkString(", "))
+    cat_lines(header :: waiting_line.toList ::: synced ::: first.getOrElse(Nil) ::: section("problems", "problems") :::
       section("commands", "commands"))
   }
 }

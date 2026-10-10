@@ -87,19 +87,29 @@ Final results can be written back to the original file.
 ### Querying (Proof) Context
 - **`get_state` returns structured information at any command position, including status (check it after edits), subgoals, prover messages (errors, warnings, writelns, .etc), type information for terms,...**
 - **`get_state` accepts flags to opt into some of the data**, like `include_types` (for Isabelle and ML), `include_facts` (theorems used in range), etc.
-- **Choose the `get_state` `detail` level.** `summary` returns counts and the first failing command (a few hundred tokens). `locations` (the default without `commands_limit`) adds one compact entry per problematic command: line range, problem kinds, first message line, no source. `full` adds sources and all messages. `commands_limit: 0` implies `summary`, a positive `commands_limit` implies `full`.
+- **Choose the `get_state` `detail` level.** `summary` returns counts and the first failing command (a few hundred tokens). `locations` (the default unless `commands_limit` is positive) adds one compact entry per problematic command: line range, problem kinds, first message line, no source. `full` adds sources and all messages. A positive `commands_limit` implies `full`. `commands_limit` only limits the plain commands list: `commands_limit: 0` is fine for "what failed?", it still lists the problems (use `detail: summary` for counts only).
 - **Each problematic command is listed once** in `problems` with its `kinds` (`failed`, `bad`, `errors`, `warnings`, ...). `problems_limit` (default 10) caps the list but the counts stay complete. `source_max_lines` (default 5) cuts long sources.
 - **After a refactor, many commands fail as consequences of one early error.** Look at `first_problem` first: it is the first failing command in file order and usually the cause. `get_session_state` with `include_failures` gives the same per theory plus the lines of failing commands, so you can locate errors across theories without a large `get_state`.
 - `include_infos` and `include_types` / `include_facts` can enlarge `full` output considerably; use them on narrow line ranges only.
 - All tools return compact readable text. `get_state`, `get_session_state`, and `find_entities` accept `format: json` for structured JSON instead.
 - **If a result exceeds the client's output limit,** Claude Code saves it to a file and tells you so. For the default text format, `grep` that file or `Read` it in line chunks. A `jq` suggestion only applies to `format: json`. Prefer a narrower line range, `detail: locations` or `summary`, or a smaller `problems_limit` over reading a huge result.
-- Use `wait_seconds` on `get_state` for a file that is not loaded yet, instead of retrying.
+- Use `wait_seconds` on `get_state` for a file that is not loaded yet, or after editing an imported file, instead of retrying. If a file shows all commands `unprocessed` and a `waiting for imported theories still being processed: …` line (`waiting_for` in JSON), it is waiting for those upstream theories; `wait_seconds` blocks until the file itself is being processed, and `get_session_state` shows the upstream progress.
+- A message in the `summary`/`locations` views ending in `(+N more lines, see detail: full)` is cut off: use `detail: full` on that line range to read all of it (the goal state and context are usually in the later lines).
+- With `include_infos`, pass `include_ml_echo: false` to drop the echo of top-level ML declarations (`val x = …`, `structure …`) and keep explicit `writeln` output.
+- `include_infos` output is capped per message (`info_max_lines`, default 30): ML top-level bindings echo their values. Print only the fields you need, or wrap the code in `let` so that nothing is echoed.
 - **Restrict by `start_line` / `end_line`** when you only care about a specific lemma or error - it is less verbose than scanning the whole file. But don't forget that local changes may have global effects.
 - **`find_entities` lets you explore defined entities (theorems, definitions, methods, ML terms, etc.)**.
 Moreover, you can use Isar commands if necessary, for example:
 - **`print_facts` - print all facts of the current context (named assumptions, case facts, intermediate results, locale assumptions, etc.)**
 - `find_theorems`
 - `find_consts`
+
+### ML Files
+- **Work on `*.ML` files through the MCP like on theories**: `read`, `edit`, `get_state`, and `find_entities` take the file path as `origin`. External edits (scripts, `sed`) are synchronised as for theories.
+- **An ML file is only processed as part of the theory that loads it** (`ML_file "Foo.ML"`). Load that theory first (`read` it); until then `get_state` on the ML file only queues it. "Not loaded by any theory" means no loaded theory loads the file.
+- **The whole ML file is one command** (the `ML_file` command). `get_state` therefore shows one entry for it, whose first message names the failing line (`ML error (line N of …)`). Use `detail: full` to see the complete message. Dependents in the loading theory are rechecked automatically after every change.
+- **Large ML files are reprocessed completely after each edit.** For exploration, test the code in a scratch theory with the same imports using `ML \<open>…\<close>` blocks: each block is its own command, so you get per-block status, types (`include_types`), and output in seconds. Move the finished code into the `.ML` file afterwards.
+- **Do not fall back to `isabelle build` just because the file is ML.** The MCP rechecks incrementally, shows ML errors with their lines, and keeps the session loaded; a batch build restarts from the session image and shows less.
 
 ### When a batch build is the better tool
 - For a mechanical change across many lines where few errors are expected, or for sessions the PIDE session is not based on (e.g. a test session built on the session you are editing), `isabelle build` and grepping its `***` lines is simpler and cheap.
