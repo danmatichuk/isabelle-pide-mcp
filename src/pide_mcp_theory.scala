@@ -34,13 +34,15 @@ object PIDE_MCP_Theory {
     def statuses(
       session: PIDE_MCP_Session,
       snapshot: Document.Snapshot,
-      names: List[Document.Node.Name]
+      names: List[Document.Node.Name],
+      failures_limit: Option[Int] = None
     ): List[Status] = {
       val nodes_status = Document_Status.Nodes_Status.empty.update_nodes(
         Date.now(), session.resources, snapshot.state, snapshot.version,
         domain = Some(names.toSet))
       names.map(name =>
-        Status(session.origin(name), nodes_status(name), nodes_status.overall_status(name)))
+        Status(session.origin(name), nodes_status(name), nodes_status.overall_status(name),
+          failures_limit.map(failures_json(snapshot.switch(name), _))))
     }
 
     def key(status: String): String = "theories_" + status
@@ -63,7 +65,8 @@ object PIDE_MCP_Theory {
   sealed case class Status(
     origin: String,
     node_status: Document_Status.Node_Status,
-    overall_status: Document_Status.Overall_Status
+    overall_status: Document_Status.Overall_Status,
+    failures: Option[JSON.Object.T] = None
   ) {
     def json: JSON.Object.T = {
       val command_status_counts = JSON_Object(
@@ -75,8 +78,21 @@ object PIDE_MCP_Theory {
       JSON_Object(
         "overall_status" -> overall_status.toString,
         "percentage_commands_processed" -> node_status.percentage) ++
-        PIDE_MCP_Command.Status.prefix_keys(command_status_counts)
+        PIDE_MCP_Command.Status.prefix_keys(command_status_counts) ++
+        JSON.optional("failures" -> failures)
     }
+  }
+
+  // locations of failing commands, without source text
+  def failures_json(snapshot: Document.Snapshot, limit: Int): JSON.Object.T = {
+    val doc = Line.Document(snapshot.node.source)
+    val failed = PIDE_MCP_Command.State.commands(snapshot, None).flatMap { entry =>
+      Option.when(entry.status.contains(PIDE_MCP_Command.Status.failed))(
+        entry.location_json(doc, entry.problem_kinds))
+    }.toList
+    JSON_Object.if_proper(failed.nonEmpty,
+      JSON_Object("first_failure" -> failed.head,
+        "failed_lines" -> failed.flatMap(_.get("line")).distinct.take(limit)))
   }
 
   def commands_running_json(

@@ -145,6 +145,12 @@ class Tool_Get_Session_State extends PIDE_MCP_Tool("get_session_state") {
     "include_commands_running", "Include commands that are currently being processed.", true)
   private val include_theory_status_arg = PIDE_MCP_Tool_Arg.bool_default(
     "include_theory_status", "Include the status and progress of theories.", true)
+  private val include_failures_arg = PIDE_MCP_Tool_Arg.bool_default(
+    "include_failures",
+    "For each theory with failed commands, include the first failing command (line and first message line, no source) " +
+      "and the line numbers of failing commands (capped at 20). The first failure is usually the cause of the later ones. " +
+      "Use this to locate errors before calling `get_state` on a narrow line range. Costs a pass over each theory.",
+    false)
   private val include_loaded_theories_arg = PIDE_MCP_Tool_Arg.bool_default(
     "include_loaded_theories", "List loaded theories per session.", false)
   private val include_session_dirs_arg = PIDE_MCP_Tool_Arg.bool_default(
@@ -167,7 +173,8 @@ class Tool_Get_Session_State extends PIDE_MCP_Tool("get_session_state") {
 
   def input_schema: JSON.Object.T = PIDE_MCP_Tool_Schema.input_schema(
     List(PIDE_MCP_Tool_Schema.running_sessions_arg, filter_origins_arg,
-      include_commands_running_arg, include_theory_status_arg, include_loaded_theories_arg,
+      include_commands_running_arg, include_theory_status_arg, include_failures_arg,
+      include_loaded_theories_arg,
       include_session_dirs_arg, include_options_arg, include_statistics_arg))
 
   override def annotations: Option[JSON.Object.T] = Some(JSON_Object("readOnlyHint" -> true))
@@ -181,6 +188,7 @@ class Tool_Get_Session_State extends PIDE_MCP_Tool("get_session_state") {
       val selected_sessions = PIDE_MCP_Tool_Util.running_sessions_param(sessions, args)
       val include_commands_running = include_commands_running_arg.get(args)
       val include_theory_status = include_theory_status_arg.get(args)
+      val include_failures = include_failures_arg.get(args)
       val include_loaded_theories = include_loaded_theories_arg.get(args)
       val include_session_dirs = include_session_dirs_arg.get(args)
       val include_statistics = include_statistics_arg.get(args)
@@ -216,7 +224,8 @@ class Tool_Get_Session_State extends PIDE_MCP_Tool("get_session_state") {
             }) ++
           JSON_Object.if_proper(include_theory_status,
             PIDE_MCP_Theory.Status.statuses_json(
-              PIDE_MCP_Theory.Status.statuses(session, snapshot, names))) ++
+              PIDE_MCP_Theory.Status.statuses(session, snapshot, names,
+                Option.when(include_failures)(20)))) ++
           JSON.optional("loaded_theories" ->
             Option.when(include_loaded_theories)(theories.json)) ++
           JSON.optional("session_directories" ->

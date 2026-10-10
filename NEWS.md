@@ -4,6 +4,7 @@ PIDE MCP NEWS -- history of user-relevant changes
 New in this PIDE MCP version
 ----------------------------
 
+* `get_session_state` has a new argument `include_failures`: first failing command and failing lines per theory.
 * `get_state` has a new argument `wait_seconds` to wait for files that are not loaded or processed yet.
 * `get_state` output is now compact. New arguments `detail` (`summary`, `locations`, `full`), `problems_limit`, and `source_max_lines`. Problematic commands are listed once in `problems` (with their `kinds`) instead of once per kind, and `first_problem` reports the first failing command. Command sources are truncated. The `commands_*` detail lists and `errors`/`warnings` detail lists are replaced by counts. INCOMPATIBILITY.
 * Reading or editing a theory loads its unloaded files.
