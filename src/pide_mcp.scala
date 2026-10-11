@@ -74,7 +74,7 @@ Usage: isabelle pide_mcp [OPTIONS]
         for (spec <- specs) {
           progress.expose_interrupt()
           Exn.capture {
-            Result.release(sessions.start_session(spec, progress))
+            Result.release(sessions.start_session(spec, progress, preconfigured = true))
           } match {
             case Exn.Res(_) =>
             case Exn.Exn(exn) =>

@@ -1,3 +1,10 @@
 # -*- shell-script -*- :mode=shellscript:
 PIDE_MCP_HOME="$COMPONENT"
 ISABELLE_PIDE_MCP_JAR="$PIDE_MCP_HOME/lib/isabelle_pide_mcp.jar"
+
+# JVM options for the MCP server only: a process that sets PIDE_MCP_JVM_OPTIONS (dev/mcp_reload_proxy.py does, an MCP
+# server entry can) gets them; every other Isabelle JVM (jEdit, VS Code, batch builds) is unchanged.
+# (JAVA_TOOL_OPTIONS cannot be used: Isabelle's launcher drops it.)
+if [ -n "$PIDE_MCP_JVM_OPTIONS" ]; then
+  ISABELLE_TOOL_JAVA_OPTIONS="$ISABELLE_TOOL_JAVA_OPTIONS $PIDE_MCP_JVM_OPTIONS"
+fi

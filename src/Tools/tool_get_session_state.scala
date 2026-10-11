@@ -132,6 +132,9 @@ class Tool_Get_Session_State extends PIDE_MCP_Tool("get_session_state") {
     "Inspect the state of running PIDE sessions, their theories (including status and progress), their resource statistics, and the currently running commands. " +
       "**Use this for a global overview, e.g. when you think the prover is stuck or you want to know what is being processed.** " +
       "Note that sorrys are not listed. " +
+      "Command counts per theory include whitespace and comment spans, so they are larger than in `get_state`. " +
+      "The `machine` block shows the machine's free memory and what all Isabelle java/poly processes (of all servers, not only this one) use; " +
+      "other Isabelle instances (e.g. the VS Code Isabelle extension) count against the machine's memory as well. " +
       PIDE_MCP_Tool_Schema.sync_disk_edits
 
   private val filter_origins_arg = PIDE_MCP_Tool_Arg.dictionary_default(
@@ -241,6 +244,7 @@ class Tool_Get_Session_State extends PIDE_MCP_Tool("get_session_state") {
       }
       PIDE_MCP_Render.result(format_arg.get(args),
         JSON_Object("sessions" -> session_states) ++
+          PIDE_MCP_Machine.json() ++
           JSON_Object.if_proper(synced.nonEmpty,
             JSON_Object("external_edits_synced" -> JSON_Object(synced))) ++
           JSON_Object.if_proper(include_statistics,

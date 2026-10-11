@@ -22,6 +22,11 @@ class PIDE_MCP_Sessions(
 
   private val state = Synchronized[VectorMap[String, Entry]](VectorMap.empty)
 
+  // the sessions the server was started with (-S): remembered, so that a later start_session of the same name reuses them
+  private val configured = Synchronized[VectorMap[String, PIDE_MCP_Session.Spec]](VectorMap.empty)
+  def configured_spec(id: String): Option[PIDE_MCP_Session.Spec] = configured.value.get(id)
+  def configured_ids: List[String] = configured.value.keys.toList
+
   private def state_json(entries: VectorMap[String, Entry]): JSON.Object.T = {
     val grouped = entries.toList.groupBy { case (_, entry) => entry.phase }
     JSON_Object(
@@ -209,7 +214,8 @@ class PIDE_MCP_Sessions(
 
   def start_session(
     spec: PIDE_MCP_Session.Spec,
-    progress: Progress
+    progress: Progress,
+    preconfigured: Boolean = false
   ): Result[PIDE_MCP_Session, Throwable] =
     Exn.result {
       val entry = state.change_result { entries =>
@@ -219,6 +225,7 @@ class PIDE_MCP_Sessions(
           error(s"Session id ${quote(session_id)} is already used")
         else {
           val entry = new Entry(session_id, spec.copy(id = Some(session_id)), progress)
+          if (preconfigured) configured.change(_ + (session_id -> spec.copy(id = Some(session_id))))
           (entry, entries + (session_id -> entry))
         }
       }
