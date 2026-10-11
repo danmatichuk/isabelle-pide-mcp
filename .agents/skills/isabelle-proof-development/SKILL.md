@@ -9,6 +9,8 @@ metadata:
 
 Guide proof search, automation, and concept search in the Isabelle proof assistant.
 
+Before starting, make sure the PIDE MCP works (load the `pide-mcp` skill, section "Before You Start"); if it does not, tell the user instead of working around it with batch builds.
+
 ## When To Use Me
 
 Whenever you need to:
@@ -42,7 +44,7 @@ IMPORTANT:
 ## How to use (Proof) Search Commands
 
 1. Insert the command at the right position: typically, after the goal opens.
-2. Poll the state/output at the command position. Respect the maximum timeouts mentioned in this skill file.
+2. Poll the state/output at the command position. Respect the maximum timeouts mentioned in this skill file (short ones: do not wait longer for `sledgehammer`).
 3. When the command returns the needed output, take it. Then remove the command.
 4. If the command doesn't return results after the maximum timeout, also remove the command.
 
@@ -50,7 +52,7 @@ IMPORTANT:
 
 **Order for closing a goal that you couldn't prove in one-shot/immediately:**
 1. `try0`: runs cheap built-in methods (`simp`, `auto`, `blast`, `force`, ...). Usually finishes in **<5 seconds**. This is your first move.
-2. `sledgehammer`: uses fact selection, built-in methods, and external provers. Usually finishes in **<30 seconds**. 
+2. `sledgehammer [timeout = 10]`: uses fact selection, built-in methods, and external provers. **Always pass a short timeout** (`[timeout = 10]`): a goal that is solvable usually gets solved within seconds, while an unsolvable one can run (and block) for a long time. 
    Use after `try0` failed and always before trying to generate a proof that you could not one-shot.
 
 ## `try0`
@@ -63,7 +65,9 @@ Poll until you hit the maximum timeout mentioned in this file and pick the faste
 
 ## `sledgehammer`
 
-- Poll sledgehammer after 5 seconds. Then again after 10 seconds. Repeat until you hit the maximum timeout mentioned in this file.
+- **Insert `sledgehammer [timeout = 10]`, never a bare `sledgehammer`.** Poll after 5 seconds, then after 10, and give up after about 15-20 seconds in total. If there is still no result, the goal is probably not within reach as stated: **remove the command** (removing it cancels the run) and do not retry with a longer timeout.
+- **A hanging or empty sledgehammer is information, not a reason to wait.** Instead, change the situation: split the goal into smaller steps (`have`), add the missing facts with `add: <facts>` or `using`, try `try0` with explicit facts, or first prove a helper lemma. Only then run sledgehammer again, again with a short timeout.
+- If a `sledgehammer` tool is available, use it instead of inserting the command and pass a short `timeout` (e.g. 10): it does not modify the file.
 - Pick the **fastest reconstruction with the simplest method**: prefer `auto`, `fastforce`, etc. over `metis` and `metis` over `smt`. 
 - **Don't use too many parallel sledgehammers**. Instead, insert just a few (<=5) and iterate.
 - `sledgehammer` has built-in fact selection: it often finds the right lemmas. 

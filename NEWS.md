@@ -4,6 +4,8 @@ PIDE MCP NEWS -- history of user-relevant changes
 New in this PIDE MCP version
 ----------------------------
 
+* The `pide-mcp` skill has a "Before You Start" section: check that the MCP tools exist and answer, and if not, stop and report the exact failure to the user instead of silently falling back to batch builds. The other skills and the server instructions point to it.
+* The server instructions (always in the agent's context) now name the `pide-mcp` and `isabelle-proof-development` skills, ask for a `get_state` check after every edit, and recommend `try0`, then `sledgehammer [timeout = 10]` (always with a short timeout) for goals that do not close. The `isabelle-proof-development` skill and the sledgehammer tool extension say the same.
 * `create_scratch` with `content` says in its result when the `theory` name in the content does not match the file name (or no header is there).
 * `create_scratch`: the extension defaults to `.thy` and a missing leading dot is added (before, `create_scratch` without extension created an unloadable file). The result includes the `theory` name for the header. New argument `imports` initialises a new `.thy` file with a theory skeleton. Files without any extension now give a clear error instead of `Illegal character "/" in path element`.
 * `get_state`: `commands_limit` 0 no longer implies `detail: summary`. The default `detail` is `full` for a positive `commands_limit` and `locations` otherwise, so that `commands_limit: 0` still lists the problems. New argument `include_ml_echo` (default true; with `include_infos`) to drop the echo of top-level ML declarations. INCOMPATIBILITY.

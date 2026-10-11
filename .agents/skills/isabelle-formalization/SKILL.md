@@ -9,6 +9,8 @@ metadata:
 
 Guidance for Isabelle formalizations.
 
+Before starting, make sure the PIDE MCP works (load the `pide-mcp` skill, section "Before You Start"); if it does not, tell the user instead of working around it with batch builds.
+
 ## When To Use Me
 
 Use this skill when working with Isabelle theory files (*.thy) or ML files (*.ML).

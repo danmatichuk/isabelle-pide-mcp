@@ -17,7 +17,11 @@ object PIDE_MCP_Protocol {
     val instructions: String =
       "Interactive proof development using one or more Isabelle sessions. " +
       "Some sessions might have already been started. " +
-      "Add material incrementally: large edits make errors and nontermination hard to isolate."
+      "Add material incrementally: large edits make errors and nontermination hard to isolate. " +
+      "If skills are available, load the `pide-mcp` skill before using these tools and the `isabelle-proof-development` skill whenever you prove something. " +
+      "After every edit (also scripted ones) check the file with `get_state`. " +
+      "If a tool call fails because the server or session is broken (not because of Isabelle content), tell the user instead of switching to batch builds. " +
+      "For a goal that does not close, try `try0`, then `sledgehammer [timeout = 10]` (always with a short timeout, remove it if it does not answer within ~20 seconds), before guessing proofs."
   }
 
   object JSON_RPC {

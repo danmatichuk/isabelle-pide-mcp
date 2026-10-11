@@ -1,6 +1,6 @@
 ---
 name: pide-mcp
-description: Using the Isabelle proof assistant with the PIDE MCP server. Use this skill whenever working with Isabelle theory files (*.thy) or ML files (*.ML) or when you are dealing with Isabelle in the general sense and have access to the PIDE MCP.
+description: Using the Isabelle proof assistant with the PIDE MCP server. Use this skill whenever working with Isabelle theory files (*.thy) or ML files (*.ML) or when you are dealing with Isabelle in the general sense. Load it also when the PIDE MCP is expected but seems unavailable: it says what to do then (report to the user, no silent fallback to batch builds).
 metadata:
   version: "1.0"
 ---
@@ -12,6 +12,23 @@ Guidance for Isabelle formalizations and proof development using the PIDE MCP se
 ## When To Use Me
 
 Use this skill when working with Isabelle theory files (*.thy) or ML files (*.ML) via the PIDE MCP.
+
+## Before You Start: Check That the MCP Works
+
+**At the start of every Isabelle task, check that the PIDE MCP works, and stop and tell the user if it does not.** Do this before reading, editing, or building anything.
+
+1. **The tools must exist.** The PIDE MCP tools (`mcp__isabelle__*`, e.g. `get_state`, `start_session`) must be in your tool list (they may be deferred: load them with ToolSearch). If they are missing, or the session notice says the Isabelle MCP server failed to connect, the MCP is not working.
+2. **The server must answer.** Call `list_sessions` (cheap). A connection error or any error that is not about your arguments means the MCP is not working.
+3. **A session must be usable.** If no session is running, start one with `start_session` (this can take minutes). If it fails, or `get_state` on the file you are about to work on fails for a reason that is not about Isabelle content, the MCP is not working.
+
+**If the MCP is not working: stop, do not work around it.** Tell the user:
+- what failed (tool missing, server not connected, session start failed, ...) and the **exact error text**,
+- what you checked (which calls),
+- and ask how to proceed.
+
+**Do not silently fall back** to `isabelle build`, editing files blindly, `grep`, or other batch workflows, and do not continue as if nothing happened. A batch fallback is only acceptable if the user explicitly agrees to it after you reported the failure.
+
+The same applies in the middle of a task: if a tool call fails because the server or session died (connection errors, "session is not ready", ...), report it instead of switching workflows. Errors in the Isabelle content (failed proofs, type errors) are normal and are **not** MCP failures: handle those as usual.
 
 ## Quick Reference
 
@@ -113,6 +130,7 @@ Moreover, you can use Isar commands if necessary, for example:
 - **Do not fall back to `isabelle build` just because the file is ML.** The MCP rechecks incrementally, shows ML errors with their lines, and keeps the session loaded; a batch build restarts from the session image and shows less.
 
 ### When a batch build is the better tool
+- **A batch build is never a silent fallback for a broken MCP** (see "Before You Start"): if the MCP does not work, tell the user.
 - For a mechanical change across many lines where few errors are expected, or for sessions the PIDE session is not based on (e.g. a test session built on the session you are editing), `isabelle build` and grepping its `***` lines is simpler and cheap.
 - For proof debugging, goal states, `find_theorems`, and checking downstream theories, the MCP is better: it rechecks incrementally in seconds.
 - To see whether later theories are healthy while an early theory is broken, put `sorry` in (or comment out) the broken part of the early theory.

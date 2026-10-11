@@ -26,7 +26,7 @@ class Tool_Sledgehammer extends PIDE_MCP_Tool("sledgehammer") {
   private val proofs_limit_arg = PIDE_MCP_Tool_Arg.int_default(
     "proofs_limit", "Maximium number of proofs to be found.", 1, minimum = Some(1))
   private val timeout_arg = PIDE_MCP_Tool_Arg.opt_int(
-    "timeout", "Seconds to wait before cancellation.",
+    "timeout", "Seconds to wait before cancellation. Always pass a short timeout (e.g. 10): sledgehammer can run for a long time on goals it cannot solve.",
     minimum = Some(1))
 
   def input_schema: JSON.Object.T = PIDE_MCP_Tool_Schema.input_schema(
