@@ -31,8 +31,28 @@ Whenever you need to:
 IMPORTANT:
 - **`try0`, `find_theorems`, and `find_consts` are very cheap and can be used frequently.**
 - **`sledgehammer` should be used whenever `try0` failed. It is almost always cheaper than guessing a proof in several attempts.**
+  `try0` and `sledgehammer` are for when you **do not know why** a method failed or what would close the goal. If you do know (a rewriting-shape problem you can read off the goal, a missing rule that `find_theorems` found, a missing class), fix that directly instead of running them first; but do not guess variants of a method.
   Don't guess proofs and proof method invocations (particularly using `metis`) that you could not one-shot: `sledgehammer` typically finds these in seconds.
 - **Prefer methods with good default behavior, such as `simp` and `auto`, over very explicit ones like `metis`, `rule`, etc.**
+
+## Goals of the form `A &&& B`
+
+A goal shown as `A &&& B` (meta-conjunction, written by you or produced by `lemma shows A and B`) is several subgoals in one. **Applying any method splits it, even the no-op `apply -`.** Observed with `lemma "(x::nat) = x &&& (y::nat) = y"`: before, `goal (1 subgoal): 1. x = x &&& y = y`; after `apply -`, `goal (2 subgoals): 1. x = x 2. y = y`. The same happens for `lemma l: shows "x = x" and "y = y"`.
+
+- **Do not use `rule conjI` or `rule conjunctionI` on it.** A method splits the chain first and then acts on subgoal 1: `apply (rule refl)` on `x = x &&& y = y` succeeds and leaves `1. y = y` (checked), while `rule conjI` fails because subgoal 1 is not a conjunction. **A `Failed to apply proof method` error shows the goal from before the method**, i.e. the unsplit chain, so that failure does not mean the chain could not be split (a `Failed to finish proof` error from `by`/`done` shows instead the state where the proof got stuck, after its methods ran). (`conjI` is for the object-level `A ∧ B`, which it splits as usual.)
+- **Do:** `apply -`, then handle each subgoal in order, or let `simp_all` / `auto` / `try0` work on all subgoals at once.
+- **Goals of other `thy_goal` commands are not `&&&` goals.** `instance` gives `1. OFCLASS(nat, two_ax_class)` and `interpretation` gives `1. two (\<lambda>x. x)`: one subgoal that `apply -` does not split (checked). `apply standard` (instance) or `apply unfold_locales` (interpretation) turns it into one subgoal per axiom (checked: two subgoals each).
+
+## Basic idioms and traps (each checked in a scratch theory)
+
+- **Closing a proof with nothing left to prove:** `using a .` closes a goal that the chained facts are exactly (`.` is `by this`); `using a b ..` closes `A ∧ B` with one standard rule; `instance nat :: c ..` does it for a class without axioms; `by -` also closes a goal from chained facts; after `apply` steps that show `No subgoals!`, finish with `done`.
+- **An unknown identifier is not an error, it is a free variable with an inferred type:** `lemma "lenght xs = lenght xs" by simp` is accepted without warning (and proves nothing about `length`), while `lemma "lenght [a, b] = 2"` is simply unprovable. A typo or a missing import shows up as an unprovable goal: check the constant with `find_consts name: ...`.
+- **`oops` abandons the goal and registers nothing** (afterwards `thm l` says `Undefined fact`). A proof that is left open means the next command fails with `Bad context for command ... -- using reset state`, and the unfinished lemma does not exist for later commands.
+- **`simp` fails without saying why when a type variable lacks the class a rule needs:** `lemma "(x::'a::{plus,zero}) + 0 = x"` then `apply simp` gives `Failed to apply proof method` on the goal `x + 0 = x`, which looks exactly like a provable goal. Sorts are hidden in the display; `declare [[show_sorts]]` shows `'a :: {plus,zero}` (`monoid_add` would make it work). Without any class annotation, Isabelle reports a type error instead (`'a::type not of sort plus`).
+- **A rewrite rule `g x = ...` only matches an application of `g`; a bare `g` is not rewritten.** In `map g xs` (also `fold g`, `filter P`, ...) `g` is bare, and Isabelle eta-contracts `λx. g x` to `g`, so `map (λx. g x) xs` is displayed as `map g xs`. Checked: with the rule `g x = x`, `simp add: g_app` fails on `map g xs = xs`; proving the function-level equation `g = id` (`by (rule ext) (simp add: g_app)`) lets `simp add: g_fun` close it. In the same way `id x = x` does not apply to the bare `id` in `map id xs` (the simp rule `map_ident` does).
+- **Induction over a nested datatype** (`datatype 'a rose = Node 'a "'a rose list"`) gives an induction hypothesis conditional on membership, `(⋀x. x ∈ set ts ⟹ P x)`. Plain `simp` cannot use it: for `mapr id t = t` the goal after `apply (induct t)` and `apply simp` is still `map (mapr (λa. a)) ts = ts` (note that `simp` also rewrote `id` to `λa. a`). `simp cong: map_cong` or a lemma such as `map_idI` closes it (both checked).
+- **A looping simp does not fail, it keeps running:** with a simp rule `ff x = ff (ff x)`, `by simp` stayed `still_running_possibly_nonterminating` for more than 40 seconds; testers saw `exception Interrupt_Breakdown raised` once such a command was interrupted. Do not wait for it: remove the rule you added last (e.g. from `simp_all add: ...`) or try plain `simp` / `simp_all` first.
+- **`Undeclared class: "??.len"`:** the `??.` prefix means the theory defining the class is not imported. Import it; find it with `find_consts` or by grepping the session directories from `get_session_state`.
 
 ## Theorem Tagging
 
