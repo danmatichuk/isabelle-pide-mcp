@@ -139,6 +139,14 @@ watched in the editor). Register them once in `~/.claude/settings.json` (or in a
 ```
 
 A registered hook runs for every session of that user: the scripts never fail on bad input, and edits of them must stay atomic (write a temporary file, then rename).
+If the registration points at a **copy** of a script (e.g. in `~/.claude/hooks/`) instead of the repository file, that copy goes stale like the global skills do: after a change to
+a script in `.claude/hooks/`, copy it again. (The global copy of `sync_diff_notice.py` is an older version without the `format: json` handling of `diff_file`.)
+
+**The global skill copies go stale.** They are plain copies: every later commit to the skills of this repository
+(and every `git pull`) leaves the global copies unchanged, and an agent started outside this repository, which loads
+the global skills, then follows the old text. **Rule: run `dev/sync_skills.sh` after every commit that changes the skills**
+(it copies the repository's skills into `~/.claude/skills` for Claude Code and keeps a backup of the old copies;
+`--dry-run` shows what would change). The global skill folders are plain copies, not symbolic links.
 
 **Note for Windows users:** You may have to adapt the paths accordingly. 
 Consult your coding agent's documentation for its configuration and skill locations on Windows.
