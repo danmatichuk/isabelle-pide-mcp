@@ -159,7 +159,10 @@ object PIDE_MCP_Render {
       s"${scalar(w.getOrElse("origin", "?"))} (${scalar(w.getOrElse("percentage_commands_processed", 0))}%)")
     val waiting_line = Option.when(waiting.nonEmpty)(
       "waiting for imported theories still being processed: " + waiting.mkString(", "))
+    val hint = Option.when(count("commands_failed") + count("errors") > 0)(
+      "hint: before guessing another method for a failing proof, run `try0`, then `sledgehammer [timeout = 10]`; " +
+      "use `find_theorems` / `suggest_facts` for lemmas, and a scratch theory to test term shapes")
     cat_lines(header :: waiting_line.toList ::: synced ::: first.getOrElse(Nil) ::: section("problems", "problems") :::
-      section("commands", "commands"))
+      section("commands", "commands") ::: hint.toList)
   }
 }

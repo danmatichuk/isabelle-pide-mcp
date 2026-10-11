@@ -22,7 +22,9 @@ object PIDE_MCP_Protocol {
       "After every edit (also scripted ones) check the file with `get_state`. " +
       "To look up theorems or constants of imported theories, use `find_theorems` / `find_consts` instead of grepping the sources: search by name (`name: rev`) or by pattern (`\"rev (rev ?xs) = ?xs\"`). " +
       "If a tool call fails because the server or session is broken (not because of Isabelle content), tell the user instead of switching to batch builds. " +
-      "For a goal that does not close, try `try0`, then `sledgehammer [timeout = 10]` (always with a short timeout, remove it if it does not answer within ~20 seconds), before guessing proofs; `suggest_facts` lists the lemmas Sledgehammer considers relevant for a goal."
+      "If your client defers tools, load the proof tools (`sledgehammer`, `suggest_facts`, `find_theorems`, `find_consts`, `create_scratch`) up front, together with the ones you start with. " +
+      "When a proof method fails, do not guess another variant: first run `try0`, then `sledgehammer [timeout = 10]` (always with a short timeout, remove it if it does not answer within ~20 seconds); `suggest_facts` lists the lemmas Sledgehammer considers relevant for a goal. " +
+      "Test a failing term or unification shape in a scratch theory instead of tracing it by hand, and evaluate ML against the live theory state with `eval_ml` instead of inserting `tracing` calls into ML files (each probe would reload the file and its dependents)."
   }
 
   object JSON_RPC {

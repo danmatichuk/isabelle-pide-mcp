@@ -20,6 +20,7 @@ Use this skill when working with Isabelle theory files (*.thy) or ML files (*.ML
 1. **The tools must exist.** The PIDE MCP tools (`mcp__isabelle__*`, e.g. `get_state`, `start_session`) must be in your tool list (they may be deferred: load them with ToolSearch). If they are missing, or the session notice says the Isabelle MCP server failed to connect, the MCP is not working.
 2. **The server must answer.** Call `list_sessions` (cheap). A connection error or any error that is not about your arguments means the MCP is not working.
 3. **A session must be usable.** If no session is running, start one with `start_session` (this can take minutes). If it fails, or `get_state` on the file you are about to work on fails for a reason that is not about Isabelle content, the MCP is not working.
+4. **Load the proof tools up front.** If your tools are deferred (listed by name only), load the ones you will need in the same `ToolSearch` call as the first ones, not when you get stuck: `select:mcp__isabelle__sledgehammer,mcp__isabelle__suggest_facts,mcp__isabelle__find_theorems,mcp__isabelle__find_consts,mcp__isabelle__create_scratch,mcp__isabelle__get_session_state`. Tools you never loaded are tools you will not think of: a failing proof is the moment to use `try0` and `sledgehammer [timeout = 10]`, not to guess another `metis`/`auto` variant.
 
 **If the MCP is not working: stop, do not work around it.** Tell the user:
 - what failed (tool missing, server not connected, session start failed, ...) and the **exact error text**,
