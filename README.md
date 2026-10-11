@@ -122,6 +122,24 @@ When doing so, **drop all session options (e.g. `-l HOL`)** so that the server s
 - For **Codex**, copy the `mcp_servers` entry of `.codex/config.toml` into `~/.codex/config.toml` and
   the folders in `.agents/skills` into `~/.agents/skills`.
 
+### Hooks for the human watching (Claude Code)
+
+`.claude/hooks/` has two hooks for `mcp__isabelle__*` tools that show the human what the agent cannot: `sync_diff_notice.py` (PostToolUse; where the diff of externally
+synchronised edits is) and `wait_notice.py` (PreToolUse and PostToolUse; "get_state waits up to 60 s for X to settle" and "finished after 16 s", with the clock time,
+because the editor shows only `Isabelle [get_state]` and a spinner while a call waits; the lines are also appended to `<project>/.pide_mcp/status.log`, which can be
+watched in the editor). Register them once in `~/.claude/settings.json` (or in a project's `.claude/settings.json`, not both: every message would appear twice) with absolute paths:
+
+```json
+{"hooks": {
+  "PreToolUse":  [{"matcher": "mcp__isabelle__.*", "hooks": [{"type": "command", "command": "<repo>/.claude/hooks/wait_notice.py"}]}],
+  "PostToolUse": [{"matcher": "mcp__isabelle__.*", "hooks": [
+    {"type": "command", "command": "<repo>/.claude/hooks/sync_diff_notice.py"},
+    {"type": "command", "command": "<repo>/.claude/hooks/wait_notice.py"}]}]
+}}
+```
+
+A registered hook runs for every session of that user: the scripts never fail on bad input, and edits of them must stay atomic (write a temporary file, then rename).
+
 **Note for Windows users:** You may have to adapt the paths accordingly. 
 Consult your coding agent's documentation for its configuration and skill locations on Windows.
 
