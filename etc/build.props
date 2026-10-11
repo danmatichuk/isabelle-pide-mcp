@@ -38,6 +38,7 @@ sources = \
   src/Tools/tool_read.scala \
   src/Tools/tool_start_session.scala \
   src/Tools/tool_stop_session.scala \
+  src/Tools/tool_suggest_facts.scala \
   src/Tools/tool_unload.scala
 services = \
   isabelle.pide.mcp.PIDE_MCP_Application \
@@ -53,4 +54,5 @@ services = \
   isabelle.pide.mcp.Tools_Read \
   isabelle.pide.mcp.Tools_Start_Session \
   isabelle.pide.mcp.Tools_Stop_Session \
+  isabelle.pide.mcp.Tools_Suggest_Facts \
   isabelle.pide.mcp.Tools_Unload

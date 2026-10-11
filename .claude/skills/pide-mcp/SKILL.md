@@ -40,6 +40,7 @@ Important rules (further elaborated in the sections below):
 - PIDE MCP can manage several Isabelle PIDE sessions. **Some sessions might have already been started.**
 - **Most tools take the id of a running session as input. Use `list_sessions` to get the ids and status of all sessions.**
 - **After every edit, call `get_state`** to see status, errors, warnings.
+- **To see which lemmas are relevant for a goal, use `suggest_facts`** (Sledgehammer's relevance filter without running provers; HOL-based sessions).
 - **To look up theorems or constants, use the `find_theorems` / `find_consts` tools** (they do not modify the file) instead of grepping the sources of imported theories (search by name, `name: rev`, or by pattern, `"rev (rev ?xs) = ?xs"`).
 - **Restrict by `start_line` / `end_line`** when querying to avoid analysing data for hundreds of finished commands in large theories.
 - **`sorry` is reported as `bad`, not as an `error`.** A clean theory has 0 bad commands AND 0 errors AND 0 failures.

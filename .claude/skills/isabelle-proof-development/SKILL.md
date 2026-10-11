@@ -63,6 +63,13 @@ using <some theorems> try0 simp: <some simp theorems> intro: <some intro rules> 
 ```
 Poll until you hit the maximum timeout mentioned in this file and pick the fastest returned proof.
 
+## `suggest_facts`
+
+**`suggest_facts` shows the lemmas that Sledgehammer's relevance filter (MePo/MaSh) selects for the goal**, most relevant first, with their statements, without running any prover (a call takes about a second). `start_line` is a line inside the proof (the goal after that line's command is used); `max_facts` defaults to 20. Needs a HOL-based session.
+- Use it when you continue **manually** (e.g. after `sledgehammer` found nothing or timed out): look at the top facts and pass fitting ones to `using`, `simp:`, `intro:`, `rule`.
+- Use it to learn which lemmas live around a goal before searching with `find_theorems`.
+- It is not a replacement for `sledgehammer`: if you only want a proof, run sledgehammer.
+
 ## `sledgehammer`
 
 - **Insert `sledgehammer [timeout = 10]`, never a bare `sledgehammer`.** Poll after 5 seconds, then after 10, and give up after about 15-20 seconds in total. If there is still no result, the goal is probably not within reach as stated: **remove the command** (removing it cancels the run) and do not retry with a longer timeout.

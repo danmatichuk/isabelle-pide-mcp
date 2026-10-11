@@ -4,6 +4,7 @@ PIDE MCP NEWS -- history of user-relevant changes
 New in this PIDE MCP version
 ----------------------------
 
+* New tool `suggest_facts` lists the facts that Sledgehammer's relevance filter (MePo/MaSh) selects for the goal at a position, most relevant first, without running provers. It loads the helper theory [ml/PIDE\_MCP\_Suggest.thy](./ml/PIDE_MCP_Suggest.thy) into the session on demand, which registers a PIDE query operation. Needs a HOL-based session.
 * New tools `find_theorems` and `find_consts` run Isabelle's searches as PIDE queries at a position of a file without modifying it (before, the agent had to insert the Isar commands into a theory). The skills and the server instructions recommend them over grepping imported sources.
 * The `pide-mcp` skill has a "Before You Start" section: check that the MCP tools exist and answer, and if not, stop and report the exact failure to the user instead of silently falling back to batch builds. The other skills and the server instructions point to it.
 * The server instructions (always in the agent's context) now name the `pide-mcp` and `isabelle-proof-development` skills, ask for a `get_state` check after every edit, and recommend `try0`, then `sledgehammer [timeout = 10]` (always with a short timeout) for goals that do not close. The `isabelle-proof-development` skill and the sledgehammer tool extension say the same.
