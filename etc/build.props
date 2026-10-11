@@ -30,6 +30,7 @@ sources = \
   src/Tools/tool_create_file.scala \
   src/Tools/tool_create_scratch.scala \
   src/Tools/tool_edit.scala \
+  src/Tools/tool_eval_ml.scala \
   src/Tools/tool_find_entities.scala \
   src/Tools/tool_find_theorems.scala \
   src/Tools/tool_get_session_state.scala \
@@ -45,6 +46,7 @@ services = \
   isabelle.pide.mcp.Tools_Create_File \
   isabelle.pide.mcp.Tools_Create_Scratch \
   isabelle.pide.mcp.Tools_Edit \
+  isabelle.pide.mcp.Tools_Eval_ML \
   isabelle.pide.mcp.Tools_Find_Entities \
   isabelle.pide.mcp.Tools_Find_Theorems \
   isabelle.pide.mcp.Tools_Find_Consts \

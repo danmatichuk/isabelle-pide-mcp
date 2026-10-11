@@ -9,19 +9,22 @@ import isabelle._
 
 object Tool_Suggest_Facts {
   val operation: String = "pide_mcp_suggest_facts"
-  private def helper_path: Path = Path.explode("$PIDE_MCP_HOME/ml/PIDE_MCP_Suggest.thy")
+  private val helper = "$PIDE_MCP_HOME/ml/PIDE_MCP_Suggest.thy"
 
-  // load the helper theory (registers the query operation) and wait until it is processed
+  // load a helper theory (registers a query operation) and wait until it is processed
   def ensure_helper(
     session: PIDE_MCP_Session,
     progress: Progress,
+    helper: String = helper,
+    what: String = "fact suggestions",
+    needs_hol: Boolean = true,
     wait_seconds: Int = 180
   ): Unit = {
-    // the helper imports Main: without HOL in the base session this would load all of HOL from source
-    if (!List("Main", "HOL.Main").exists(session.resources.loaded_theory))
-      error("Fact suggestions need Sledgehammer: the session " + quote(session.id) +
+    // a helper that imports Main would load all of HOL from source without HOL in the base session
+    if (needs_hol && !List("Main", "HOL.Main").exists(session.resources.loaded_theory))
+      error(s"Fact suggestions need Sledgehammer: the session ${quote(session.id)}" +
         " is not based on HOL (theory Main is not part of its base session).")
-    val node_name = session.node_name(helper_path.expand.implode)
+    val node_name = session.node_name(Path.explode(helper).expand.implode)
     var snapshot =
       PIDE_MCP_Tool_Util.require_loaded_origin_snapshot(session, node_name, progress, wait_seconds)
     val deadline = Time.now() + Time.seconds(wait_seconds)
@@ -33,9 +36,9 @@ object Tool_Suggest_Facts {
     }
     if (status.overall_status != Document_Status.Overall_Status.ok) {
       val failure = PIDE_MCP_Theory.failures_json(snapshot, 1)
-      error("The helper theory for fact suggestions could not be loaded " +
-        "(Sledgehammer must be available, i.e. the session must build on HOL): " +
-        JSON.Format(failure))
+      error(s"The helper theory for $what could not be loaded" +
+        (if (needs_hol) " (Sledgehammer must be available, i.e. the session must build on HOL)" else "") +
+        ": " + JSON.Format(failure))
     }
   }
 }
