@@ -101,6 +101,67 @@ object PIDE_MCP_Tool_Util {
     snapshot
   }
 
+  /* Synchronise loaded files that were edited on disk outside of the server (e.g. by scripts).
+     Waits until the edit is part of the current document version (not until it is processed),
+     so that the state never shows results of the replaced text. Returns the synced changes. */
+  private val sync_lines_limit = 10
+
+  // changed lines of the new text, e.g. "11", "151-152", "30 (removed)"
+  private def sync_lines(change: PIDE_MCP_Session#Sync_Change): List[String] = {
+    val ranges = change.hunks.map { h =>
+      if (h.new_lines == 0) s"${h.new_line} (removed)"
+      else if (h.new_lines == 1) h.new_line.toString
+      else s"${h.new_line}-${h.new_line + h.new_lines - 1}"
+    }
+    if (ranges.length > sync_lines_limit)
+      ranges.take(sync_lines_limit) :+ s"... (+${ranges.length - sync_lines_limit} more spans)"
+    else ranges
+  }
+
+  private val sync_diff_keep = 100
+
+  // write the diffs of a synchronisation to a file; returns its path
+  private def write_sync_diff(session: PIDE_MCP_Session, result: PIDE_MCP_Session#Sync_Result): Option[String] =
+    Option.when(session.sync_diff_dir.nonEmpty) {
+      val dir = Path.explode(session.sync_diff_dir).absolute  // relative: project-local
+      Isabelle_System.make_directory(dir)
+      val ignore = dir + Path.basic(".gitignore")  // keep the diffs out of the project's git status
+      if (!ignore.is_file) File.write(ignore, "*\n")
+      val stamp = Date.Format("uuuuMMdd-HHmmss-SSS")(Date.now())
+      val file = dir + Path.basic(s"sync_${session.id}_$stamp.diff")
+      File.write(file, Symbol.encode(result.changes.map(_.diff).mkString("\n")))
+      val old = Option(dir.file.listFiles).toList.flatten.filter(_.getName.endsWith(".diff"))
+        .sortBy(_.getName).dropRight(sync_diff_keep)
+      old.foreach(_.delete())
+      File.platform_path(file)
+    }
+
+  def sync_disk_edits(session: PIDE_MCP_Session, progress: Progress): Option[JSON.Object.T] = {
+    val result = session.sync_disk(progress)
+    if (result.nonEmpty) {
+      session.await_stable_snapshot(progress)
+      session.resolve_dependencies(result.node_names, progress)
+      Some(JSON_Object(
+        "files" -> result.changes.map(change => JSON_Object(
+          "origin" -> session.origin(change.node_name),
+          "changed_lines" -> change.changed_lines,
+          "spans" -> change.spans,
+          "lines" -> sync_lines(change),
+          "total_lines" -> change.total_lines))) ++
+        JSON.optional("diff_file" -> (Exn.result(write_sync_diff(session, result)) match {
+          case Exn.Res(file) => file
+          case Exn.Exn(_) => None // the diff is a convenience only
+        })))
+    }
+    else None
+  }
+
+  def with_synced(
+    json: JSON.Object.T,
+    synced: Option[JSON.Object.T]
+  ): JSON.Object.T =
+    json ++ JSON.optional("external_edits_synced" -> synced)
+
   def require_ordered_lines(
     opt_start_line: Option[Int],
     opt_end_line: Option[Int]

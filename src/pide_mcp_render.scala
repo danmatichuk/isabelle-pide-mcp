@@ -138,7 +138,21 @@ object PIDE_MCP_Render {
         "" :: s"$title (${shown.length} of $total):" ::
           shown.flatMap(c => if (is_full(c)) command_lines(c) else List(location_line(c)))
       }
-    cat_lines(header :: first.getOrElse(Nil) ::: section("problems", "problems") :::
+    val synced = state.get("external_edits_synced").toList.flatMap { x =>
+      val sync = obj(x)
+      val files = list(sync.getOrElse("files", Nil)).map(obj).map { f =>
+        s"${scalar(f.getOrElse("origin", "?"))} (${scalar(f.getOrElse("changed_lines", 0))} of " +
+          s"${scalar(f.getOrElse("total_lines", 0))} lines in ${scalar(f.getOrElse("spans", 0))} spans; " +
+          s"lines ${str_list(f.getOrElse("lines", Nil)).mkString(", ")})"
+      }
+      List("external edits synced: " + files.mkString(", ") +
+        sync.get("diff_file").fold("") { f =>
+          val path = scalar(f)
+          s"\nfull diff: $path\nACTION REQUIRED: the user cannot see this tool output. In your next reply, include this link verbatim: " +
+            s"[sync diff]($path). Do not read the file."
+        })
+    }
+    cat_lines(header :: synced ::: first.getOrElse(Nil) ::: section("problems", "problems") :::
       section("commands", "commands"))
   }
 }

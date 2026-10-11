@@ -144,6 +144,7 @@ class PIDE_MCP_Session private(
   def options: Options = resources.options
   def progress_delay: Time = options.seconds("pide_mcp_session_progress_delay")
   def range_context: Int = options.int("pide_mcp_range_context")
+  def sync_diff_dir: String = options.string("pide_mcp_sync_diff_dir")
   def statistics_limit: Int = options.int("pide_mcp_session_statistics_limit")
   def base_session: String = resources.session_background.session_name
   def directories(): List[Path] = Sessions.directories(dirs, Nil).map(_._2)
@@ -325,13 +326,6 @@ class PIDE_MCP_Session private(
 
   def editor(progress: Progress): PIDE_MCP_Editor = new PIDE_MCP_Editor(this, progress)
 
-  private def replace_edits(old_text: String, new_text: String): List[Text.Edit] = {
-    val prefix = old_text.iterator.zip(new_text.iterator).takeWhile(_ == _).length
-    val (old_rest, new_rest) = (old_text.drop(prefix), new_text.drop(prefix))
-    val suffix = old_rest.reverseIterator.zip(new_rest.reverseIterator).takeWhile(_ == _).length
-    Text.Edit.replace(prefix, old_rest.dropRight(suffix), new_rest.dropRight(suffix))
-  }
-
   private case class Node_Model(
     node_name: Document.Node.Name,
     node: Document.Node,
@@ -342,7 +336,7 @@ class PIDE_MCP_Session private(
     def node_required: Boolean = text.nonEmpty
     def untyped_data: AnyRef = File_Format.registry.parse_data(node_name, text)
 
-    lazy val pending_edits: List[Text.Edit] = replace_edits(node.source, text)
+    lazy val pending_edits: List[Text.Edit] = PIDE_MCP_Diff.edits(node.source, text)
     def is_stable: Boolean = pending_edits.isEmpty
 
     def get_text(range: Text.Range): Option[String] = range.try_substring(text)
@@ -367,6 +361,95 @@ class PIDE_MCP_Session private(
       else node_edits(node_header, pending_edits, node_perspective)
   }
 
+  /* synchronisation with disk edits made outside of the server */
+
+  // modification time and size of files read from disk, to cheaply detect external edits
+  private val disk_stamps = Synchronized(Map.empty[Document.Node.Name, (Long, Long)])
+
+  private def disk_stamp(node_name: Document.Node.Name): Option[(Long, Long)] =
+    Option.when(resources.make_theory_content(node_name).isEmpty && node_name.path.is_file) {
+      val file = node_name.path.file
+      (file.lastModified, file.length)
+    }
+
+  // taken before reading the file, such that later changes are never missed
+  private def record_disk_stamp(node_name: Document.Node.Name): Unit =
+    disk_stamp(node_name) match {
+      case Some(stamp) => disk_stamps.change(_ + (node_name -> stamp))
+      case None => disk_stamps.change(_ - node_name)
+    }
+
+  sealed case class Sync_Change(
+    node_name: Document.Node.Name,
+    total_lines: Int,
+    changed_lines: Int,
+    spans: Int,
+    hunks: List[PIDE_MCP_Diff.Hunk],
+    diff: String
+  )
+
+  sealed case class Sync_Result(changes: List[Sync_Change]) {
+    def nonEmpty: Boolean = changes.nonEmpty
+    def node_names: List[Document.Node.Name] = changes.map(_.node_name)
+  }
+
+  private def line_ranges(doc: Line.Document, perspective: Text.Perspective): List[(Int, Int)] =
+    perspective.ranges.map { range =>
+      val line_range = doc.range(range)
+      (line_range.start.line1, line_range.stop.line1)
+    }
+
+  // keep the visible lines of a node when its text changes
+  private def preserved_perspective(
+    old_text: String,
+    new_text: String,
+    perspective: Text.Perspective
+  ): Text.Perspective = {
+    val new_lines = Line.Document(new_text).lines.length
+    val ranges = Exn.result(line_ranges(Line.Document(old_text), perspective)) match {
+      case Exn.Res(ranges) => ranges
+      case Exn.Exn(_) => Nil
+    }
+    val clamped = ranges.flatMap { case (start, stop) =>
+      Option.when(start <= new_lines)((start, stop min new_lines)) }
+    PIDE_MCP_Util.text_perspective(Line.Document(new_text), clamped, 0)
+  }
+
+  /* Update all loaded nodes whose files were changed on disk since they were last read.
+     The differences are sent to PIDE as several small edits, keeping the visible lines. */
+  def sync_disk(progress: Progress): Sync_Result =
+    with_lock(progress) {
+      val version = tip_version(progress)
+      val stamps = disk_stamps.value
+      val candidates = version.nodes.iterator.collect {
+        case (name, node) if PIDE_MCP_Util.is_loaded_dynamic(node) &&
+            !is_base_session_theory(name) =>
+          name -> node
+      }.filter { case (name, _) =>
+        disk_stamp(name).exists(stamp => !stamps.get(name).contains(stamp))
+      }.toList
+      val synced = candidates.flatMap { case (name, node) =>
+        Exn.result {
+          record_disk_stamp(name)
+          val text = read_file_content(name)
+          val hunks = PIDE_MCP_Diff.hunks(node.source, text)
+          val model = Node_Model(name, node, text,
+            preserved_perspective(node.source, text, node.text_perspective))
+          (Sync_Change(name, Line.Document(text).lines.length,
+            hunks.map(_.changed_lines).sum, hunks.length, hunks,
+            PIDE_MCP_Diff.unified(name.node.stripPrefix("/"), node.source, text)), model.edits)
+        } match {
+          case Exn.Res(res) => Some(res)
+          case Exn.Exn(exn) if Exn.is_interrupt(exn) => throw exn
+          case Exn.Exn(_) =>
+            disk_stamps.change(_ - name) // retry at the next synchronisation
+            None
+        }
+      }
+      update(synced.flatMap(_._2))
+      Sync_Result(synced.map(_._1).filter(_.changed_lines > 0))
+    }
+
   private def hide_edits(
     nodes: Document.Nodes,
     keep: Set[Document.Node.Name]
@@ -385,6 +468,7 @@ class PIDE_MCP_Session private(
     val models = with_lock(progress) {
       val version = tip_version(progress)
       val models1 = nodes.map { case (name, visible_lines) =>
+        record_disk_stamp(name)
         val text = read_file_content(name)
         val doc = Line.Document(text)
         val line_ranges = visible_lines.map { case (start_line, opt_end_line) =>

@@ -11,6 +11,9 @@ import isabelle._
 object PIDE_MCP_Tool_Schema {
   val implicit_load_file: String = "Implicitly loads the file if required."
   val implicit_reload_file: String = "Implicitly (re)loads the file."
+  val sync_disk_edits: String =
+    "Also picks up edits of loaded files made on disk outside of the server (e.g. by scripts), " +
+      "so no explicit read is needed after such edits."
   val range_visibility: String = "Sets the PIDE perspective on the range."
   val session_restart: String =
     "**Use it only when required**, e.g. when you have to restart a session due to " +

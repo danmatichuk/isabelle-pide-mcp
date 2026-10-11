@@ -12,7 +12,8 @@ class Tool_Get_State extends PIDE_MCP_Tool("get_state") {
       "Returns a summary (errors, warnings, commands still running, total timing,...) and details for all commands in range. " +
       "**Use this frequently to check if you are making progress, what is left to be done, and importantly, if certain commands are still processing, potentially even looping.** " +
       "For non-theory files, the response has a single command entry derived from the command that loaded it in the respective theory. " +
-      PIDE_MCP_Tool_Schema.implicit_load_file
+      PIDE_MCP_Tool_Schema.implicit_load_file + " " +
+      PIDE_MCP_Tool_Schema.sync_disk_edits
 
   private val include_types_arg = PIDE_MCP_Tool_Arg.bool_default(
     "include_types",
@@ -80,6 +81,7 @@ class Tool_Get_State extends PIDE_MCP_Tool("get_state") {
     PIDE_MCP_Tool_Result.result {
       val session = PIDE_MCP_Tool_Util.running_session_param(sessions, args)
       val node_name = PIDE_MCP_Tool_Util.origin_param(session, args)
+      val synced = PIDE_MCP_Tool_Util.sync_disk_edits(session, progress)
       val snapshot =
         PIDE_MCP_Tool_Util.require_loaded_origin_snapshot(
           session, node_name, progress, wait_seconds_arg.get(args))
@@ -101,8 +103,10 @@ class Tool_Get_State extends PIDE_MCP_Tool("get_state") {
         case None => PIDE_MCP_Command.State.Detail.locations
       })
       PIDE_MCP_Render.result(format_arg.get(args),
-        PIDE_MCP_Command.State.states_json(
-          states, doc, opts, detail, commands_limit, problems_limit_arg.get(args)),
+        PIDE_MCP_Tool_Util.with_synced(
+          PIDE_MCP_Command.State.states_json(
+            states, doc, opts, detail, commands_limit, problems_limit_arg.get(args)),
+          synced),
         PIDE_MCP_Render.get_state_text)
     }
 }

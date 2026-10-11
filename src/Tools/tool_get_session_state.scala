@@ -131,7 +131,8 @@ class Tool_Get_Session_State extends PIDE_MCP_Tool("get_session_state") {
   def description: String =
     "Inspect the state of running PIDE sessions, their theories (including status and progress), their resource statistics, and the currently running commands. " +
       "**Use this for a global overview, e.g. when you think the prover is stuck or you want to know what is being processed.** " +
-      "Note that sorrys are not listed."
+      "Note that sorrys are not listed. " +
+      PIDE_MCP_Tool_Schema.sync_disk_edits
 
   private val filter_origins_arg = PIDE_MCP_Tool_Arg.dictionary_default(
     "filter_origins",
@@ -195,6 +196,8 @@ class Tool_Get_Session_State extends PIDE_MCP_Tool("get_session_state") {
       val include_statistics = include_statistics_arg.get(args)
       val include_options = include_options_arg.get(args)
       val filter_origins = filter_origins_arg.get(args)
+      val synced = selected_sessions.flatMap(session =>
+        PIDE_MCP_Tool_Util.sync_disk_edits(session, progress).map(session.id -> _))
       val selected_ids = selected_sessions.map(_.id)
       val unknown = filter_origins.keysIterator.filterNot(selected_ids.toSet).toList
       if (unknown.nonEmpty) {
@@ -238,6 +241,8 @@ class Tool_Get_Session_State extends PIDE_MCP_Tool("get_session_state") {
       }
       PIDE_MCP_Render.result(format_arg.get(args),
         JSON_Object("sessions" -> session_states) ++
+          JSON_Object.if_proper(synced.nonEmpty,
+            JSON_Object("external_edits_synced" -> JSON_Object(synced))) ++
           JSON_Object.if_proper(include_statistics,
             Tool_Get_Session_State.ml_stats_json(session_statistics.values.toList) ++
               Tool_Get_Session_State.jvm_stats_json()),

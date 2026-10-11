@@ -9,6 +9,7 @@ sources = \
   src/pide_mcp_json.scala \
   src/pide_mcp_protocol.scala \
   src/pide_mcp_definition.scala \
+  src/pide_mcp_diff.scala \
   src/result.scala \
   src/queue_lock.scala \
   src/pide_mcp_progress.scala \

@@ -45,14 +45,16 @@ Important rules (further elaborated in the sections below):
 
 ### State Synchronization
 - **All changes are immediately checked** by PIDE after edits.
-- **Prefer MCP tools for edits** to keep PIDE state synchronized. For a scripted rewrite of many lines, you may edit the file externally, but then `read` it afterwards to re-synchronise; dependents are then rechecked. Reading via other tools (e.g. grep) for unloaded theories for exploration (e.g. grepping the AFP) is OK.
-- **If you experience discrepancies between the PIDE state and the file's disk content, use read on the affected file to re-synchronise the content.** Such discrepancies might happen, for example, when a human user is working on the same file as you or when you didn't edit a file via PIDE but with primitive file operations.
+- **You may edit with whatever is convenient:** the `edit` tool, or scripts (`sed`, Python,...) for mechanical or multi-location rewrites. Write each file in one go, not in several partial steps.
+- **`get_state`, `get_session_state`, and `find_entities` automatically pick up changes made on disk** to all loaded files (also by a human who saves their editor), and send only the changed lines to PIDE. After a scripted edit, just call `get_state`; no `read` is needed. The result then contains `external edits synced: <file> (N of M lines in K spans; lines 12, 30-31, 62 (removed))` giving the changed lines in the new text, capped at 10 spans (`external_edits_synced` in `format: json`). The note also names a `full diff` file: it is for the human reviewer, so do not read it (it would only use up your context) unless asked. When you tell the user about a scripted edit, give them that file as a markdown link, e.g. `[sync diff](/abs/path/sync_x.diff)`, because tool output is not clickable for them. (If the note instead says `full diff shown to the user`, the project's PostToolUse hook already showed them the path: nothing to do.) The ranges only show where the text changed: a local edit can break commands anywhere after it (and in dependent theories), so check the whole file's state, not just those lines.
+- After a big rewrite, many commands are still reprocessing when `get_state` answers: use `wait_seconds` or retry before trusting the counts.
+- **Use `read` to re-synchronise** only for files that are not loaded yet, or if the state still does not match the disk (changes are detected by modification time and size, so a same-size edit within the same timestamp tick can be missed). Base session theories are static and never synchronised.
+- Reading unloaded theories with other tools (e.g. grepping the AFP) is fine.
 - **Avoid absolute file path imports for theories. Use session-qualified theory names for sessions available to you.** See `get_session_state` on how to find session qualifiers.
-- When you are told to synchronise, just re-read the file.
-- **Edits require `old_text` (the text to be searched for in the target range). If the file changed since you last read it (e.g., a human edited it concurrently), old_text might not be found and the edit be rejected. Re-synchronise in this case.**
+- **`edit` synchronises its file from disk before matching `old_text`.** If `old_text` is rejected as not found, the text really differs from what you expect (e.g. a human edited it): `read` the range again.
 
 ### After Every Edit
-1. **Check for errors/unfinished/successful commands after edits with `get_state`**.
+1. **Check for errors/unfinished/successful commands after edits (also scripted ones) with `get_state`**, which synchronises disk edits first.
 2. **`sorry`s are included as `bad` commands. `errors` counts actual failures. A "clean" state requires both to be 0.**
 
 ### Time Management

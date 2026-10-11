@@ -4,6 +4,8 @@ PIDE MCP NEWS -- history of user-relevant changes
 New in this PIDE MCP version
 ----------------------------
 
+* Synchronised external edits are also written as a unified diff to a file in directory `pide_mcp_sync_diff_dir` (default `.pide_mcp/sync_diffs`, relative to the server's working directory, i.e. the project; the directory ignores itself in git; set empty to disable); only the file name is reported to the agent, so that the diff can be reviewed without using up its context. The newest 100 diffs are kept.
+* `get_state`, `get_session_state`, and `find_entities` now synchronise loaded files that were edited on disk outside of the server (e.g. by scripts or `sed`) before answering, so an explicit `read` is no longer needed. Only the changed line spans are sent to PIDE. The result reports them as `external_edits_synced`.
 * `get_state` and `get_session_state` now return readable text (real line breaks, no JSON quoting) as content only, without `structuredContent`. Pass `format: json` for the previous JSON output including `structuredContent`. INCOMPATIBILITY.
 * `get_session_state` has a new argument `include_failures`: first failing command and failing lines per theory.
 * `get_state` has a new argument `wait_seconds` to wait for files that are not loaded or processed yet.

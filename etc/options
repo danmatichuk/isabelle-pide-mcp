@@ -18,5 +18,8 @@ option pide_mcp_progress_threshold : real = 20 for pide_mcp
 option pide_mcp_session_statistics_limit : int = 200 for pide_mcp
   -- "maximum number of buffered runtime statistics samples per session"
 
+option pide_mcp_sync_diff_dir : string = ".pide_mcp/sync_diffs" for pide_mcp
+  -- "directory for unified diffs of external edits that were synchronised from disk (empty: no diffs written); a relative path is relative to the working directory of the server, i.e. the project; the directory ignores itself in git; only the file name is reported to the agent"
+
 option pide_mcp_tools : string = "*" for pide_mcp
   -- "comma-separated names of tools to serve or \"*\" to serve all"
