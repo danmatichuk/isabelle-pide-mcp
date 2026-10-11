@@ -67,7 +67,17 @@ class PIDE_MCP_Server(
     override protected def run(): Unit = {
       val result = Exn.capture {
         progress.expose_interrupt()
-        tool.handle(sessions, call.args, progress)
+        val result = tool.handle(sessions, call.args, progress)
+        val ignored = tool.ignored_arguments(call.args)
+        if (ignored.isEmpty) result
+        else {
+          val note = s"ignored unknown argument(s): ${ignored.mkString(", ")} (not in the schema of this tool; see its description)"
+          result match {
+            case Result.Res(PIDE_MCP_Tool_Result.Text(text)) => Result.Res(PIDE_MCP_Tool_Result.Text(text + "\nnote: " + note))
+            case Result.Res(JSON.Object(obj)) => Result.Res(obj + ("note" -> note))
+            case other => other
+          }
+        }
       }
       events.send(Event.Tool_Result(id, result))
     }

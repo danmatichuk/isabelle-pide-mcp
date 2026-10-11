@@ -22,14 +22,22 @@ object PIDE_MCP_Tool_Arg {
 
     val string: Format[String] = Format(JSON_Object("type" -> "string"),
       JSON.Value.String.unapply, identity[String])
+    // clients whose tool schemas are outdated may send numbers and booleans as strings: accept them
     val bool: Format[Boolean] = Format(JSON_Object("type" -> "boolean"),
-      JSON.Value.Boolean.unapply, identity[Boolean])
+      json => JSON.Value.Boolean.unapply(json).orElse(JSON.Value.String.unapply(json).collect {
+        case "true" => true
+        case "false" => false
+      }), identity[Boolean])
     def int(
       minimum: Option[Int] = None,
       maximum: Option[Int] = None
     ): Format[Int] = {
-      val unapply = (json: JSON.T) => JSON.Value.Int.unapply(json).filter(value =>
-        minimum.forall(_ <= value) && maximum.forall(value <= _))
+      val unapply = (json: JSON.T) => JSON.Value.Int.unapply(json).orElse(
+        JSON.Value.String.unapply(json).flatMap(s => s.trim.toIntOption)).map { value =>
+        if (minimum.forall(_ <= value) && maximum.forall(value <= _)) value
+        else error("Out of range: " + value + " (allowed: " +
+          minimum.fold("")(_.toString) + ".." + maximum.fold("")(_.toString) + ")")
+      }
       Format(JSON_Object("type" -> "integer") ++
           JSON.optional("minimum" -> minimum) ++ JSON.optional("maximum" -> maximum),
         unapply, identity[Int])

@@ -20,6 +20,12 @@ abstract class PIDE_MCP_Tool(val name: String) {
   def input_schema: JSON.Object.T
   def annotations: Option[JSON.Object.T] = None
 
+  // arguments of a call that are not in the tool's schema (they would be ignored silently)
+  def ignored_arguments(args: JSON.Object.T): List[String] = {
+    val known = input_schema.get("properties").collect { case JSON.Object(o) => o.keySet }.getOrElse(Set.empty)
+    if (known.isEmpty) Nil else args.keysIterator.filterNot(known).toList.sorted
+  }
+
   // called after each session start
   def start(
     sessions: PIDE_MCP_Sessions,
