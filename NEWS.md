@@ -4,6 +4,7 @@ PIDE MCP NEWS -- history of user-relevant changes
 New in this PIDE MCP version
 ----------------------------
 
+* Add Isabelle/ML skill file.
 * Reading or editing a theory loads its unloaded files.
 * `unload` now also unloads files of unloaded theories unless a remaining theory still loads them.
 * Add [tool\_extensions](./tool_extensions) with experimental sledgehammer tool as an example user-level tool extension.
