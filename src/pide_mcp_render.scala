@@ -7,6 +7,14 @@ package isabelle.pide.mcp
 
 import isabelle._
 
+// Advice in tool output is read the first time and skimmed afterwards: each kind of hint is shown in full once
+// per server run and as a short tag later.
+object PIDE_MCP_Hints {
+  private val shown = scala.collection.mutable.Set.empty[String]
+  def once(kind: String, full: String, short: String): String =
+    synchronized { if (shown.add(kind)) full else short }
+}
+
 object PIDE_MCP_Render {
   enum Output_Format { case text, json }
 
@@ -187,7 +195,8 @@ object PIDE_MCP_Render {
     val note = state.get("note").map(n => List("note: " + scalar(n))).toList.flatten :::
       state.get("earlier_problems").map(n => "*** earlier problems: " + scalar(n) + " ***").toList
     val note_lines = note
-    val first = state.get("first_problem").map(p => List("first problem: " + location_line(obj(p))))
+    val first = state.get("first_problem").map(p => List("first problem: " + location_line(obj(p))) :::
+      state.get("open_proof").map(n => "*** " + scalar(n) + " ***").toList)
     def section(key: String, title: String): List[String] =
       state.get(key).map(obj).filter(_.contains(key)).toList.flatMap { sec =>
         val shown = list(sec(key)).map(obj)
@@ -218,7 +227,7 @@ object PIDE_MCP_Render {
       s"${scalar(w.getOrElse("origin", "?"))} (${scalar(w.getOrElse("percentage_commands_processed", 0))}%)")
     val waiting_line = Option.when(waiting.nonEmpty)(
       "waiting for imported theories still being processed: " + waiting.mkString(", "))
-    val hint = Option.when(count("commands_failed") + count("errors") > 0)(
+    val hint = Option.when(count("commands_failed") + count("errors") > 0)(PIDE_MCP_Hints.once("failing_proof",
       "hint: before guessing another method for a failing proof, run `try0`, then `sledgehammer [timeout = 10]`; " +
       "use `find_theorems` / `suggest_facts` for lemmas, and a scratch theory to test term shapes. " +
       "In a `Failed to apply proof method` error the goal is the state BEFORE that method (it failed as a whole); " +
@@ -226,7 +235,8 @@ object PIDE_MCP_Render {
       "Commands after a failed command of the same proof run on the state before it: their `finished` is no evidence. " +
       "A failed or sorry'd LEMMA is still usable by later commands, which then also show `finished`: everything after the first problem may rest on it. " +
       "If a method fails without a reason, see \"Basic idioms and traps\" in the isabelle-proof-development skill " +
-      "(missing class on a type variable, unknown identifier = free variable, open proof, looping simp)")
+      "(missing class on a type variable, unknown identifier = free variable, open proof, looping simp)",
+      "hint: failing proof: `try0`, then `sledgehammer [timeout = 10]`, before another method (full hint: the first failure of this server run)"))
     val message_hint_lines = message_hints(JSON.Format(json)).map("hint: " + _)
     val main_lines = header :: provisional.getOrElse(Nil) ::: note_lines ::: waiting_line.toList ::: synced ::: first.getOrElse(Nil) :::
       dedupe_blocks(section("problems", "problems") ::: section("commands", "commands"))

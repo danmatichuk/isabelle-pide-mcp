@@ -262,6 +262,8 @@ object PIDE_MCP_Command {
         _.toString)
     }
 
+    private val proof_closers = Set("by", "qed", "done", "oops", "sorry", "end", ".", "..", "next", "}")
+
     val default_source_max_lines: Int = 5
     val default_info_max_lines: Int = 30
     val default_problems_limit: Int = 10
@@ -278,6 +280,10 @@ object PIDE_MCP_Command {
       val returned_commands = new mutable.ListBuffer[JSON.Object.T]
       val returned_problems = new mutable.ListBuffer[JSON.Object.T]
       var first_problem: Option[JSON.Object.T] = None
+      var previous: Option[(Int, String)] = None  // line and name of the command before
+      var open_cause: Option[Option[(Int, String)]] = None  // the command that left a proof open, if the "Bad context" failures point to one
+      var open_checked = false
+      var open_count = 0
       var total_timing_ms = 0L
       var count = 0
       var problems = 0
@@ -289,6 +295,14 @@ object PIDE_MCP_Command {
         counts("bad") += state.bad.length
         counts("errors") += state.errors
         counts("warnings") += state.warnings
+        if (state.bad_context) {
+          if (!open_checked) {  // after a command that closes a proof the failure has another reason: say nothing then
+            open_checked = true
+            if (previous.forall(p => !proof_closers.contains(p._2))) open_cause = Some(previous)
+          }
+          if (open_cause.nonEmpty) open_count += 1
+        }
+        previous = Some((doc.position(state.command_range.start).line1, state.cmd.span.name))
         val problem_kinds = state.problem_kinds
         if (problem_kinds.nonEmpty) {
           problems += 1
@@ -305,7 +319,12 @@ object PIDE_MCP_Command {
         "errors", "warnings", Status.unprocessed, Status.finished)
       Status.prefix_keys(JSON_Object("total_timing_ms" -> total_timing_ms) ++
         JSON_Object(kinds.map(kind => kind -> counts(kind)))) ++
-        JSON.optional("first_problem" -> first_problem) +
+        JSON.optional("first_problem" -> first_problem) ++
+        JSON.optional("open_proof" -> open_cause.map { cause =>
+          val after = cause.fold("the proof before these commands")(c => s"the command at line ${c._1} (`${c._2}`)")
+          s"$open_count command(s) fail only because $after left a proof or goal open (a failed or incomplete command leaves its goal open, " +
+            "and the next command then fails with `Bad context ... using reset state`): finish or abandon that proof first (`done`, `sorry`, `oops`); " +
+            "run experiments in a scratch theory (create_scratch) instead of the file you are building" }) +
         ("problems" -> (JSON_Object("count" -> problems) ++
           JSON_Object.if_proper(detail != Detail.summary,
             JSON_Object("count_returned" -> returned_problems.length,
@@ -360,6 +379,10 @@ object PIDE_MCP_Command {
           Option.when(errors > 0)("errors"),
           Option.when(outside_hint.nonEmpty)("errors_outside_range"),
           Option.when(warnings > 0)("warnings")).flatten
+
+    // the command failed only because the proof before it was left open ("Bad context for command ... using reset state")
+    lazy val bad_context: Boolean =
+      results.exists(r => Protocol.is_error(r) && PIDE_MCP_Util.elem_body_plain_text(r).contains("Bad context for command"))
 
     // errors of a file (one command) that lie outside the requested lines
     lazy val outside_hint: Option[String] =

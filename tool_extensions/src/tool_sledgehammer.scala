@@ -74,10 +74,17 @@ class Tool_Sledgehammer extends PIDE_MCP_Tool("sledgehammer") {
       val query_args = List(provers_arg.get(args),
         isar_proofs_arg.get(args).toString, try0_arg.get(args).toString)
       val proofs_limit = proofs_limit_arg.get(args)
-      new PIDE_MCP_Query(session, context, "sledgehammer", progress)
+      val result = new PIDE_MCP_Query(session, context, "sledgehammer", progress)
         .run(query_args, timeout_arg.get(args).map(seconds => Time.seconds(seconds)),
           stop = output => proofs_count(output) >= proofs_limit)
-        .json(PIDE_MCP_Command.Message_Kind.all)
+      // no proof found: an unprovable goal looks the same as a hard one, and a false goal is common after a failed proof
+      val json = result.json(PIDE_MCP_Command.Message_Kind.all)
+      json ++
+        JSON_Object.if_proper(proofs_count(result.output) == 0 && !json.contains("error"), JSON_Object("note" ->
+          PIDE_MCP_Hints.once("sledgehammer_nothing",
+            "no proof found. Before more attempts, check that the goal is true: run `nitpick` and `quickcheck` on it " +
+              "(a counterexample means fix the statement or the lemma it came from).",
+            "no proof found: is the goal true? (`nitpick` / `quickcheck`)")))
     }
 }
 
