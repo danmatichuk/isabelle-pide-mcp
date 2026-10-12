@@ -80,9 +80,9 @@ For anything but trivial proofs:
 
 ### Structured Statements
 - **Prefer structured Isar statements over meta-quantifiers over object-level quantifiers, e.g.**
-  - **implicit quantification, `⋀`, and `for` rather than object-level foralls**
-  - `obtains` rather than existential quantifier in conclusion
-  - Isar's `and` rather than object-level conjunction
+    - **implicit quantification, `⋀`, and `for` rather than object-level foralls**
+    - `obtains` rather than existential quantifier in conclusion
+    - Isar's `and` rather than object-level conjunction
 
 ### File and theory structure
 - Keep theory files readable and structured with Isabelle sections (e.g. `section`, `subsection`, `text`).
@@ -91,10 +91,10 @@ For anything but trivial proofs:
 ### Documentation
 - Use `text ‹ … ›` for prose explanations and add sections.
 - Add short explanations before major definitions/theorems:
-  - why the definition is chosen,
-  - intended use,
-  - any discrepancies and references to the common literature,
+    - why the definition is chosen,
+    - intended use,
+    - any discrepancies and references to the common literature,
 - Follow standard Isabelle conventions for naming:
-  - Lemmas/theorems with descriptive names.
-  - Use suffixes like `I`, `E`, `D`, `_iff` when conventional.
+    - Lemmas/theorems with descriptive names.
+    - Use suffixes like `I`, `E`, `D`, `_iff` when conventional.
 

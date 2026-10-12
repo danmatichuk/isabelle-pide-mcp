@@ -6,8 +6,8 @@
 
 This repository contains:
 1. A Model Context Protocol (MCP) server to **let AI agents interactively work with Isabelle** sessions, theories, and ML files via Isabelle/PIDE.
-   The MCP server is **headless** and **editor-agnostic**: you can let the agent work on its own or run it alongside Isabelle/jEdit or Isabelle/VSCode.
-   The MCP server is also **customizable** and **extensible**: you can freely add and remove MCP tools offered to the agents.
+    The MCP server is **headless** and **editor-agnostic**: you can let the agent work on its own or run it alongside Isabelle/jEdit or Isabelle/VSCode.
+    The MCP server is also **customizable** and **extensible**: you can freely add and remove MCP tools offered to the agents.
 1. A curated set of MCP tools for typical Isabelle workflows (auto-formalization, state inspection, entity lookups, session management, etc.), supporting cancellation and progress reports.
 1. A set of agent skills on how to effectively use the MCP and provided tools and general guidance for formalization tasks and Isabelle.
 
@@ -38,37 +38,37 @@ To interactively explore the agent's changes, you may also run an Isabelle/jEdit
 
 **Take note of the following when using the MCP server:**
 - The server manages its own PIDE sessions. In particular, this means that **your editor's session and the MCP server's sessions are independent of each other**.
-  For example, commands will be processed by the MCP server's sessions AND the editor's session,
-  and Isabelle options passed to the editor session (e.g. base session and included session directories) also have to be passed to the MCP server.
+    For example, commands will be processed by the MCP server's sessions AND the editor's session,
+    and Isabelle options passed to the editor session (e.g. base session and included session directories) also have to be passed to the MCP server.
 - **If you edit the same files as the MCP server, it will only see your changes once they are written to disk.**
-  The provided MCP tools automatically synchronize with disk on every read and write.
-  Vice versa, **if a file is edited via the MCP server, you may need to manually reload the file in your editor** in case the editor does not auto-reload on disk changes.
-  In Isabelle/jEdit, it is sometimes necessary to reload manually (e.g. by using the F5 key). Isabelle/VSCode supports auto-reload. 
-  Avoid editing a file while the agent works on it. You might have to merge conflicts by hand otherwise.
+    The provided MCP tools automatically synchronize with disk on every read and write.
+    Vice versa, **if a file is edited via the MCP server, you may need to manually reload the file in your editor** in case the editor does not auto-reload on disk changes.
+    In Isabelle/jEdit, it is sometimes necessary to reload manually (e.g. by using the F5 key). Isabelle/VSCode supports auto-reload. 
+    Avoid editing a file while the agent works on it. You might have to merge conflicts by hand otherwise.
 - If you want the agent to see proof states in pre-built base sessions, you have to build them with `-o show_states`. Note that such builds take significantly longer!
 
 ## Installing the MCP Server
 
 1. Install the supported Isabelle version. The supported version is stored in [ISABELLE\_VERSION](./ISABELLE_VERSION). Newer versions may also work (without guarantee). If you use a version compatible with an Isabelle release, [download it](https://isabelle.in.tum.de/). If you use a development version, insert the version number into the command below:
-```bash
-hg clone https://isabelle.in.tum.de/repos/isabelle
-isabelle/Admin/init -r <VERSION_NUMBER>
-```
-   **Note for  macOS users:** on first start, macOS may block Isabelle. Open it, cancel the security dialog, then allow it in *System Settings → Privacy & Security* ("Allow Apps..."). See the [Isabelle installation notes](https://isabelle.in.tum.de/installation.html).
+    ```bash
+    hg clone https://isabelle.in.tum.de/repos/isabelle
+    isabelle/Admin/init -r <VERSION_NUMBER>
+    ```
+    **Note for  macOS users:** on first start, macOS may block Isabelle. Open it, cancel the security dialog, then allow it in *System Settings → Privacy & Security* ("Allow Apps..."). See the [Isabelle installation notes](https://isabelle.in.tum.de/installation.html).
 
 2. Clone and navigate into this repository. Then check out the branch matching your Isabelle version, as explained further above:
-```bash
-git clone <THIS_REPOSITORY>
-cd isabelle-pide-mcp
-git checkout <BRANCH>
-```
-   **Note for Windows users:** make sure that `etc/settings` uses `LF` line breaks.
+    ```bash
+    git clone <THIS_REPOSITORY>
+    cd isabelle-pide-mcp
+    git checkout <BRANCH>
+    ```
+    **Note for Windows users:** make sure that `etc/settings` uses `LF` line breaks.
 
 3. Register this project as an Isabelle component by inserting the file path to this project into the command below.
-```bash
-isabelle/bin/isabelle components -u <PATH_TO_THIS_DIRECTORY>
-```
-   Note that this registers the component by path. If you move this directory later, you hence have to amend the registration.
+    ```bash
+    isabelle/bin/isabelle components -u <PATH_TO_THIS_DIRECTORY>
+    ```
+    Note that this registers the component by path. If you move this directory later, you hence have to amend the registration.
 
 ## Running the MCP Server
 
@@ -116,11 +116,11 @@ When doing so, **drop all session options (e.g. `-l HOL`)** so that the server s
 **adjust the path to Isabelle** in the MCP configuration.
 
 - For **OpenCode**, copy the `mcp` entry of `.opencode/opencode.json` into
-  `~/.config/opencode/opencode.json` and the folders in `.opencode/skills` into `~/.config/opencode/skills`.
+    `~/.config/opencode/opencode.json` and the folders in `.opencode/skills` into `~/.config/opencode/skills`.
 - For **Claude Code**, copy the `mcpServers` entry of `.mcp.json` into `~/.claude.json` and the folders
-  in `.claude/skills` into `~/.claude/skills`.
+    in `.claude/skills` into `~/.claude/skills`.
 - For **Codex**, copy the `mcp_servers` entry of `.codex/config.toml` into `~/.codex/config.toml` and
-  the folders in `.agents/skills` into `~/.agents/skills`.
+    the folders in `.agents/skills` into `~/.agents/skills`.
 
 **Note for Windows users:** You may have to adapt the paths accordingly. 
 Consult your coding agent's documentation for its configuration and skill locations on Windows.
@@ -193,10 +193,10 @@ See [tool\_extensions](./tool_extensions) for such a component with experimental
 - Node sources of base session blobs should be loaded from database. They are currently read from disk.
 - There's a memory leak problem in PIDE that affects Isabelle/ML programming applications with PIDE MCP, cf. this [email by Kevin Kappelmann](https://isabelle.zulipchat.com/#narrow/channel/247541-Mirror.3A-Isabelle-Users-Mailing-List/topic/.5Bisabelle.5D.20memory.20leak.28.3F.29.3A.20GC.20not.20reclaiming.20memory.20when.20.2E.2E.2E/with/629549584).
 - It would be desirable to have the option to share a PIDE session among the MCP server and editors (Isabelle/jEdit, Isabelle/VSCode).
-  This requires changes in the Isabelle distribution sources.
+    This requires changes in the Isabelle distribution sources.
 - It would be desirable to explore changes with PIDE without altering the affected document's state, 
-  cf. this [email by Hanno Becker](https://isabelle.zulipchat.com/#narrow/channel/247541-Mirror.3A-Isabelle-Users-Mailing-List/topic/.5Bisabelle.5D.20Isabelle.2FREPL/near/581059372).
-  This requires changes in the Isabelle distribution sources.
+    cf. this [email by Hanno Becker](https://isabelle.zulipchat.com/#narrow/channel/247541-Mirror.3A-Isabelle-Users-Mailing-List/topic/.5Bisabelle.5D.20Isabelle.2FREPL/near/581059372).
+    This requires changes in the Isabelle distribution sources.
 
 ## Related Work
 

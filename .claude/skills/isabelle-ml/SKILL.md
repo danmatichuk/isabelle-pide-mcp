@@ -20,7 +20,7 @@ It communicates with Isabelle/Scala, which manages the "non-logical" part of Isa
 
 - **Consult the references hierarchy outlined below to obtain contextual knowledge** on Isabelle/ML. You may do so repeatedly when working on larger projects.
 - **Use Isabelle's coding and documentation styles and standards and its library functions**. 
-  You can find them in Isabelle's home directory sources and in the manuals (see below).
+    You can find them in Isabelle's home directory sources and in the manuals (see below).
 - **Naming standards are particularly important as is sticking to Isabelle/ML's jargon**, including in comments and when communicating with the human user.
 - **Use comments sparingly**, comparable to the distribution.
 - Besides being in line with the distribution, **your code must be correct, efficient, intelligible, modular, and maintainable**.
@@ -34,14 +34,14 @@ Also use these sources (including author names of commits) when communicating wi
 Only speculate about the intent of a piece of code if the following do not provide a definite answer and be transparent about that.
 
 1. Documentation:
-  - `NEWS`: human-readable changelog, grouped by Isabelle release.
-  - `src/Doc/Implementation/`: the main manual for Isabelle/ML
-  - `src/Doc/Isar_Ref/`: the manual for Isar and its main commands.
-  - Other manuals in `src/Doc/` (e.g. `Functions`, `Datatypes`, `Locales`): use as appropriate when requiring expert knowledge in these areas.
+    - `NEWS`: human-readable changelog, grouped by Isabelle release.
+    - `src/Doc/Implementation/`: the main manual for Isabelle/ML
+    - `src/Doc/Isar_Ref/`: the manual for Isar and its main commands.
+    - Other manuals in `src/Doc/` (e.g. `Functions`, `Datatypes`, `Locales`): use as appropriate when requiring expert knowledge in these areas.
 2. ML sources: Look at the implementation and usage sites of concepts.
-   The latter often clarifies (implicit) invariants that have to be preserved by callers.
+    The latter often clarifies (implicit) invariants that have to be preserved by callers.
 3. Mercurial history: The decade-old history often explains why code looks the way it does (including important details) and who is responsible for it.
-   Affected files of a commit typically provide useful context.
+    Affected files of a commit typically provide useful context.
 
 ## Isabelle/ML Jargon Overview (non-exhaustive)
 
