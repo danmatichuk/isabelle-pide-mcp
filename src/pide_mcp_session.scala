@@ -267,6 +267,10 @@ class PIDE_MCP_Session private(
   def write_file_content(path: Path, text: String): Unit =
     File.write(path, Symbol.encode(Line.normalize(text)))
 
+  // text that is already in its on-disk (symbol-encoded) form
+  def write_file_text(path: Path, text: String): Unit =
+    File.write(path, text)
+
   def node_source(
     snapshot: Document.Snapshot,
     node_name: Document.Node.Name
