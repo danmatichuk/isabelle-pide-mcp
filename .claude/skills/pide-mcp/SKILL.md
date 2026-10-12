@@ -42,6 +42,8 @@ Important rules (further elaborated in the sections below):
 - **Most tools take the id of a running session as input. Use `list_sessions` to get the ids and status of all sessions.**
 - **After every edit, call `get_state`** to see status, errors, warnings.
 - **To see which lemmas are relevant for a goal, use `suggest_facts`** (Sledgehammer's relevance filter without running provers; HOL-based sessions).
+- **To test ML against the live theory state, use `eval_ml`** (ML code run at a position of a loaded theory, with the ML structures of its imports; the file is not modified). Do not insert `tracing` calls into an ML file: every probe reloads the file and all dependent theories.
+- **After an edit of an imported file, wait with `get_state` and `wait_seconds` plus `wait_settled: true`** instead of polling: it returns when the file and its imports are processed or the file has a failed command. `edit` with `check: true` returns the status summary right away.
 - **To look up theorems or constants, use the `find_theorems` / `find_consts` tools** (they do not modify the file) instead of grepping the sources of imported theories (search by name, `name: rev`, or by pattern, `"rev (rev ?xs) = ?xs"`).
 - **Restrict by `start_line` / `end_line`** when querying to avoid analysing data for hundreds of finished commands in large theories.
 - **`sorry` is reported as `bad`, not as an `error`.** A clean theory has 0 bad commands AND 0 errors AND 0 failures.

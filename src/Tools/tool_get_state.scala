@@ -6,6 +6,16 @@ package isabelle.pide.mcp
 
 import isabelle._
 
+object Tool_Get_State {
+  // (hash of the last text, number of identical results in a row) per session, file and range
+  val repeats = Synchronized(Map.empty[String, (Int, Int)])
+  val repeat_note_after: Int = 3
+  // wait after external edits were synced, if no wait_seconds is given
+  val implicit_wait_seconds: Int = 30
+  // wait_settled without wait_seconds
+  val settled_default_seconds: Int = 60
+}
+
 class Tool_Get_State extends PIDE_MCP_Tool("get_state") {
   def description: String =
     "Inspect the state of a (range in a) file: goals, variables, errors, warnings, etc. " +
@@ -69,21 +79,41 @@ class Tool_Get_State extends PIDE_MCP_Tool("get_state") {
       "ML top-level bindings echo their values, which can be very long.",
     PIDE_MCP_Command.State.default_info_max_lines, minimum = Some(1))
 
+  private val max_output_lines_arg = PIDE_MCP_Tool_Arg.int_default(
+    "max_output_lines",
+    "Hard cap on the lines of the text result (`text` format): longer output is cut after this many lines with a note saying what was cut " +
+      "(an `include_infos` over a whole file produced 700+ lines). 0: no cap.",
+    400, minimum = Some(0))
   private val format_arg = PIDE_MCP_Render.Output_Format.arg
   private val wait_seconds_arg = PIDE_MCP_Tool_Arg.int_default(
     "wait_seconds",
     "If the file is not loaded or not processed yet, wait up to this many seconds for it instead of failing right away. " +
       "This also waits while the file only waits for imported theories that are still being processed (e.g. after editing an imported file); " +
       "the result then lists them as `waiting_for`. " +
-      "Use this after the first request for a file to save a round trip.",
-    0, minimum = Some(0), maximum = Some(600))
+      "Use this after the first request for a file to save a round trip. " +
+      "If this call synchronised external edits from disk, it waits up to 30 seconds for the file to settle even without wait_seconds. " +
+      "A result that may still change says `provisional` with the reason.",
+    0, minimum = Some(0), maximum = Some(3600))
+  private val wait_settled_arg = PIDE_MCP_Tool_Arg.bool_default(
+    "wait_settled",
+    "With `wait_seconds`: do not return as soon as the file is being processed, but wait until the file and the imported " +
+      "theories it depends on are completely processed or the file has a failed command (whichever comes first), " +
+      "or until the time is up. Imported theories that are still pending are listed as `waiting_for`. " +
+      "Use this after an edit of an imported file instead of polling. Without `wait_seconds` it waits up to 60 seconds. " +
+      "Commands that failed before do not end the wait.",
+    false)
+  private val stop_at_error_arg = PIDE_MCP_Tool_Arg.bool_default(
+    "stop_at_error",
+    "With `wait_settled`: also stop waiting as soon as one more command of the file fails (to look at the first error " +
+      "of a long reload without waiting for the rest).",
+    false)
 
   def input_schema: JSON.Object.T = PIDE_MCP_Tool_Schema.input_schema(
     List(PIDE_MCP_Tool_Schema.running_session_arg, PIDE_MCP_Tool_Schema.origin_arg,
       PIDE_MCP_Tool_Schema.opt_start_line_arg, PIDE_MCP_Tool_Schema.opt_end_line_arg,
       include_types_arg, include_facts_arg, include_infos_arg, include_full_markup_arg,
       commands_limit_arg, detail_arg, problems_limit_arg, source_max_lines_arg, info_max_lines_arg, include_ml_echo_arg,
-      wait_seconds_arg, format_arg))
+      wait_seconds_arg, wait_settled_arg, stop_at_error_arg, max_output_lines_arg, format_arg))
 
   override def annotations: Option[JSON.Object.T] = Some(JSON_Object("readOnlyHint" -> true))
 
@@ -96,11 +126,26 @@ class Tool_Get_State extends PIDE_MCP_Tool("get_state") {
       val session = PIDE_MCP_Tool_Util.running_session_param(sessions, args)
       val node_name = PIDE_MCP_Tool_Util.origin_param(session, args)
       val synced = PIDE_MCP_Tool_Util.sync_disk_edits(session, progress)
-      val wait_seconds = wait_seconds_arg.get(args)
+      // after a disk edit was synced, the result of the old text is gone and the new text is not processed
+      // yet: wait a bit for it by default
+      val reloaded = PIDE_MCP_Tool_Util.reload_failed_header(session, node_name, progress)
+      val settled_requested = wait_settled_arg.get(args)
+      val implicit_wait = synced.nonEmpty && wait_seconds_arg.get(args) == 0
+      val wait_seconds =
+        if (wait_seconds_arg.get(args) > 0) wait_seconds_arg.get(args)
+        else if (reloaded) Tool_Get_State.implicit_wait_seconds  // the file is being loaded again
+        else if (settled_requested) Tool_Get_State.settled_default_seconds
+        else if (implicit_wait) Tool_Get_State.implicit_wait_seconds
+        else 0
       val loaded_snapshot =
         PIDE_MCP_Tool_Util.require_loaded_origin_snapshot(session, node_name, progress, wait_seconds)
-      val (snapshot, waiting) = PIDE_MCP_Tool_Util.await_upstream(
+      val (upstream_snapshot, upstream_waiting) = PIDE_MCP_Tool_Util.await_upstream(
         session, node_name, loaded_snapshot, wait_seconds, progress)
+      val (snapshot, waiting) =
+        if ((settled_requested || implicit_wait) && wait_seconds > 0)
+          PIDE_MCP_Tool_Util.await_settled(session, node_name, upstream_snapshot, wait_seconds, progress,
+            stop_at_error_arg.get(args))
+        else (upstream_snapshot, upstream_waiting)
       val opt_start_line = PIDE_MCP_Tool_Schema.opt_start_line_arg.get(args)
       val opt_end_line = PIDE_MCP_Tool_Schema.opt_end_line_arg.get(args)
       val doc = Line.Document(snapshot.node.source)
@@ -117,14 +162,36 @@ class Tool_Get_State extends PIDE_MCP_Tool("get_state") {
         case Some(limit) if limit > 0 => PIDE_MCP_Command.State.Detail.full
         case _ => PIDE_MCP_Command.State.Detail.locations
       })
-      PIDE_MCP_Render.result(format_arg.get(args),
+      val state_json = PIDE_MCP_Command.State.states_json(
+        states, doc, opts, detail, commands_limit, problems_limit_arg.get(args))
+      val infos_note = Option.when(include_infos_arg.get(args) && detail != PIDE_MCP_Command.State.Detail.full)(
+        "include_infos has no effect without detail: full; use detail: full with a line range")
+      val earlier = PIDE_MCP_Tool_Util.earlier_problems_note(snapshot, doc, start_line)
+      val (provisional, blocked) =
+        PIDE_MCP_Tool_Util.settle_notes(session, snapshot, node_name, doc, state_json, waiting)
+      // an import that failed and does not run is not "still being processed": the BLOCKED text says what it is
+      val waiting_shown = if (blocked.exists(_.contains("waits for its import"))) Nil else waiting
+      val rendered = PIDE_MCP_Render.result(format_arg.get(args),
         PIDE_MCP_Tool_Util.with_waiting(
-          PIDE_MCP_Tool_Util.with_synced(
-            PIDE_MCP_Command.State.states_json(
-              states, doc, opts, detail, commands_limit, problems_limit_arg.get(args)),
-            synced),
-          waiting),
-        PIDE_MCP_Render.get_state_text)
+          PIDE_MCP_Tool_Util.with_synced(state_json, synced), waiting_shown) ++
+          JSON.optional("provisional" -> provisional) ++ JSON.optional("blocked" -> blocked) ++
+          JSON.optional("note" -> infos_note) ++
+          JSON.optional("earlier_problems" -> earlier),
+        json => PIDE_MCP_Render.get_state_text(json, max_output_lines_arg.get(args)))
+      rendered match {
+        case PIDE_MCP_Tool_Result.Text(text) =>
+          // the same answer again and again: say that waiting or repeating changes nothing
+          val key = session.id + "|" + node_name.node + "|" + opt_start_line + "|" + opt_end_line
+          val repeats = Tool_Get_State.repeats.change_result { table =>
+            val n = table.get(key).filter(_._1 == text.hashCode).map(_._2 + 1).getOrElse(1)
+            (n, table + (key -> (text.hashCode, n)))
+          }
+          if (repeats < Tool_Get_State.repeat_note_after) rendered
+          else PIDE_MCP_Tool_Result.Text(text +
+            s"\nnote: this result is identical to the previous ${repeats - 1} call(s) for this file and range: waiting or repeating it " +
+            "changes nothing. Read the first problem, fix it (or change the file), then call again")
+        case other => other
+      }
     }
 }
 
