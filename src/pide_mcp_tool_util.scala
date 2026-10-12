@@ -219,6 +219,35 @@ object PIDE_MCP_Tool_Util {
   ): JSON.Object.T =
     json ++ JSON.optional("external_edits_synced" -> synced)
 
+  // offset in the file for a query: the end of a line (or the given prefix of it), by default the
+  // first command (the theory header), where the theory context with all imports is available
+  def query_offset(
+    snapshot: Document.Snapshot,
+    start_line: Option[Int],
+    prefix: Option[String]
+  ): Text.Offset = {
+    val doc = Line.Document(snapshot.node.source)
+    start_line match {
+      case None => // the last command before `end`: the context with everything the file defines
+        val proper = snapshot.node.commands.iterator.filter(!_.is_ignored).toList
+        proper.reverseIterator.find(_.span.name != "end").orElse(proper.headOption)
+          .flatMap(snapshot.node.command_start).getOrElse(error("The file has no commands"))
+      case Some(line) =>
+        require_lines_in_bounds(Some(line), None, doc.lines.length)
+        val range = PIDE_MCP_Util.text_range(doc, line, line).get
+        val text = range.substring(snapshot.node.source).stripLineEnd
+        val indent = text.length - text.stripLeading.length
+        val caret = prefix match {
+          case None => text.length
+          case Some(p) =>  // leading whitespace does not matter
+            if (!text.stripLeading.startsWith(p.stripLeading))
+              error(s"Line $line does not start with ${quote(p)}. Actual line: ${quote(text)}")
+            indent + p.stripLeading.length
+        }
+        range.start + caret
+    }
+  }
+
   def require_ordered_lines(
     opt_start_line: Option[Int],
     opt_end_line: Option[Int]

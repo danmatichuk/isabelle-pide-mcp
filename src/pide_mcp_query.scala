@@ -9,6 +9,13 @@ import isabelle._
 object PIDE_MCP_Query {
   enum Outcome { case finished, stopped, timeout }
   sealed case class Result(outcome: Outcome, elapsed: Time, output: Editor.Output) {
+    // the messages as plain text, errors marked
+    def text: String =
+      cat_lines(output.messages.map { msg =>
+        val text = PIDE_MCP_Util.elem_body_plain_text(msg)
+        if (Protocol.is_error(msg)) "error: " + text else text
+      })
+
     def json(kinds: List[String]): JSON.Object.T =
       JSON_Object.flatten(
         List(Some("status" -> outcome.toString), Some("elapsed_ms" -> elapsed.ms)) :::

@@ -24,7 +24,7 @@ Whenever you need to:
 - Use automation tags (`simp`, `intro`, `elim`, etc.) on theorems, but be wise about them.
 - When a goal doesn't close with an obvious guess, **your default move is to use `try0`**. When `try0` fails, **use `sledgehammer`** (poll its output!). 
 - When automation is brittle or explodes (non-determination): switch to structured Isar proofs and add intermediate steps.
-- When unsure whether a lemma exists or what lemmas exist in general, **use `find_theorems`** to search in all transitively imported theories.  
+- When unsure whether a lemma exists or what lemmas exist in general, **use `find_theorems`** to search in all transitively imported theories. **Unsure of the exact name? Search by part of it: `name: rev`**; the name search is the replacement for grepping for a lemma name.  
 - When unsure whether a constant exists or what constants exist in general, **use `find_consts`** to search in all transitively imported theories.  
 - When searching for concepts in other theories, import the theory if it is from the base session or it is a small dependency; otherwise use grep (since it avoids building the dependency).
 
@@ -77,7 +77,8 @@ Poll until you hit the maximum timeout mentioned in this file and pick the faste
 ## `find_theorems`
 
 Searches loaded theorems.
-Syntax: `find_theorems [<n>] <criterion> <criterion> ...`
+**Use the `find_theorems` MCP tool** (argument `query`, optional `limit`, `start_line` for goal-dependent criteria): it does not modify the file and answers in a call. **Do not grep the sources for theorems that are imported**: `find_theorems` is faster, matches by pattern, and finds the exact statement. Inserting the Isar command `find_theorems` into a theory is only the fallback if the tool is not available. Use grep for theories that are not imported (see above).
+Syntax of the query (the same as after the Isar command): `<criterion> <criterion> ...`; the tool takes the count as `limit`.
 
 | Criterion | Syntax | Matches |
 | --- | --- | --- |
@@ -100,6 +101,8 @@ find_theorems 5 "rev (rev ?xs) = ?xs"    (* ✅ cap at 5 results *)
 ```
 
 ## `find_consts`
+
+**Use the `find_consts` MCP tool** (argument `query`), not grep, for constants of imported theories.
 
 Searches loaded constants.
 Syntax: `find_consts <criterion> <criterion> ...`
