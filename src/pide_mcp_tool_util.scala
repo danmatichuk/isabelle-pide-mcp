@@ -154,7 +154,18 @@ object PIDE_MCP_Tool_Util {
           (reload_estimate(session, change.node_name) match {
             case Right(estimate) => JSON_Object("reprocessed" -> (estimate - "previous_processing_ms"))
             case Left(_) => JSON_Object()
-          }))) ++
+          }) ++
+          // a changed ML file: say at once whether it has a syntax error (its reload would only report it after minutes)
+          (if (!change.node_name.is_theory && change.node_name.path.implode.endsWith(".ML"))
+            Exn.result {
+              val text = File.read(change.node_name.path)
+              PIDE_MCP_ML_Check.check(text).toOption.filter(_.errors.nonEmpty).map(result =>
+                PIDE_MCP_ML_Check.describe(change.node_name.path.base.implode, text, result))
+            } match {
+              case Exn.Res(Some(description)) => JSON_Object("ml_syntax_error" -> description)
+              case _ => JSON_Object()
+            }
+           else JSON_Object()))) ++
         JSON.optional("diff_file" -> (Exn.result(write_sync_diff(session, result)) match {
           case Exn.Res(file) => file
           case Exn.Exn(_) => None // the diff is a convenience only

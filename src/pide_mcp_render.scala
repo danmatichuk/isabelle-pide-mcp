@@ -204,8 +204,10 @@ object PIDE_MCP_Render {
           f.get("reprocessed").collect { case JSON.Object(r) =>
             s"; reprocesses ${scalar(r.getOrElse("theories", 0))} theories, ${scalar(r.getOrElse("commands", 0))} commands" }.getOrElse("")
       }
+      val ml_errors = list(sync.getOrElse("files", Nil)).map(obj).flatMap(_.get("ml_syntax_error")).map(scalar)
       List("external edits synced: " + files.mkString(", ") +
         " [tip: `edit` with check:true applies a change, waits and checks it in one call]" +
+        ml_errors.map("\n*** " + _ + " ***").mkString +
         sync.get("diff_file").fold("") { f =>
           val path = scalar(f)
           s"\nfull diff: $path\nACTION REQUIRED: the user cannot see this tool output. In your next reply, include this link verbatim: " +
