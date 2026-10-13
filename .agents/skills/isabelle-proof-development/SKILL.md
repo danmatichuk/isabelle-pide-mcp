@@ -31,8 +31,8 @@ Whenever you need to:
 IMPORTANT:
 - **`try0`, `find_theorems`, and `find_consts` are very cheap and can be used frequently.**
 - **`sledgehammer` should be used whenever `try0` failed. It is almost always cheaper than guessing a proof in several attempts.**
-  `try0` and `sledgehammer` are for when you **do not know why** a method failed or what would close the goal. If you do know (a rewriting-shape problem you can read off the goal, a missing rule that `find_theorems` found, a missing class), fix that directly instead of running them first; but do not guess variants of a method.
-  Don't guess proofs and proof method invocations (particularly using `metis`) that you could not one-shot: `sledgehammer` typically finds these in seconds.
+    `try0` and `sledgehammer` are for when you **do not know why** a method failed or what would close the goal. If you do know (a rewriting-shape problem you can read off the goal, a missing rule that `find_theorems` found, a missing class), fix that directly instead of running them first; but do not guess variants of a method.
+    Don't guess proofs and proof method invocations (particularly using `metis`) that you could not one-shot: `sledgehammer` typically finds these in seconds.
 - **Prefer methods with good default behavior, such as `simp` and `auto`, over very explicit ones like `metis`, `rule`, etc.**
 
 ## Goals of the form `A &&& B`
@@ -73,7 +73,7 @@ A goal shown as `A &&& B` (meta-conjunction, written by you or produced by `lemm
 **Order for closing a goal that you couldn't prove in one-shot/immediately:**
 1. `try0`: runs cheap built-in methods (`simp`, `auto`, `blast`, `force`, ...). Usually finishes in **<5 seconds**. This is your first move.
 2. `sledgehammer [timeout = 10]`: uses fact selection, built-in methods, and external provers. **Always pass a short timeout** (`[timeout = 10]`): a goal that is solvable usually gets solved within seconds, while an unsolvable one can run (and block) for a long time. 
-   Use after `try0` failed and always before trying to generate a proof that you could not one-shot.
+    Use after `try0` failed and always before trying to generate a proof that you could not one-shot.
 
 ## `try0`
 
@@ -99,7 +99,7 @@ Poll until you hit the maximum timeout mentioned in this file and pick the faste
 - **Don't use too many parallel sledgehammers**. Instead, insert just a few (<=5) and iterate.
 - `sledgehammer` has built-in fact selection: it often finds the right lemmas. 
 - **Only transitively imported theorems can be queried by sledgehammer.** If you suspect some currently non-imported theory contains useful material, you first have to import it.
-  It is much quicker to let sledgehammer find the right lemmas than to search for them on your own.
+    It is much quicker to let sledgehammer find the right lemmas than to search for them on your own.
 
 ## `find_theorems`
 

@@ -65,7 +65,7 @@ Important rules (further elaborated in the sections below):
 - **Each (PIDE) session has a unique id and its own base session, directories, options, and independent state.** A file loaded in one is invisible to the others.
 - Most tools take a running session's id as input, which may be omitted when exactly one session runs.
 - **`start_session` is synchronous and may take minutes** as it builds the base session if missing.
-  **Use it only when required**, e.g. to restart an unresponsive session, after a `ROOT` file change, or to move to a different base session.
+    **Use it only when required**, e.g. to restart an unresponsive session, after a `ROOT` file change, or to move to a different base session.
 - **Only use `stop_session` when required**, e.g. when you have to restart a session or urgently need to free resources.
 - `stop_session` keeps files on disk, unless some tool decides to cleanup (e.g. `create_scratch` deletes the session's scratch files).
 - **`unload` unloads a file and its dependents from the session. Only use it when required**, e.g. when you are 100% certain a theory got unresponsive or you urgently need to free resources.
@@ -165,32 +165,32 @@ Use `session_requirements` when you do not want to work out the parent session y
 #### Large Changes
 - ❌ **Don't:** Add hundreds of lines of new definitions and proofs in one edit
 - ✅ **Do:** Add incrementally - a few definitions at a time, check after each
-  - Easier to identify source of errors
-  - Faster feedback on timeouts
-  - Better isolation of problematic proofs
+    - Easier to identify source of errors
+    - Faster feedback on timeouts
+    - Better isolation of problematic proofs
 
 #### Status Checking
 - ❌ **Don't:** Make multiple edits without checking status
-  ```
-  edit  (* Add lemma 1 *)
-  edit  (* Add lemma 2 *)
-  edit  (* Add lemma 3 - which one has the error? *)
-  ```
+    ```
+    edit  (* Add lemma 1 *)
+    edit  (* Add lemma 2 *)
+    edit  (* Add lemma 3 - which one has the error? *)
+    ```
 - ✅ **Do:** Check `get_state` after each significant edit
-  ```
-  edit
-  get_state  (* Verify status: ok *)
-  edit  (* Continue only after verification *)
-  ```
+    ```
+    edit
+    get_state  (* Verify status: ok *)
+    edit  (* Continue only after verification *)
+    ```
 
 #### Scratch Theory Usage
 - ❌ **Don't:** Try to import scratch theories from your main development
 - ✅ **Do:** Use scratch theories for experimentation, then copy successful results back to main theory
-  ```
-  1. create_scratch to test approach
-  2. Verify it works in scratch theory
-  3. Copy successful proof back to main theory with edit
-  ```
+    ```
+    1. create_scratch to test approach
+    2. Verify it works in scratch theory
+    3. Copy successful proof back to main theory with edit
+    ```
 
 ### Error Recovery
 
