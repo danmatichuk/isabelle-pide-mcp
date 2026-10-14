@@ -44,11 +44,18 @@ class Tool_Eval_ML extends PIDE_MCP_Tool("eval_ml") {
 class Tools_Eval_ML extends PIDE_MCP_Tools(new Tool_Eval_ML)
 
 object Tool_Eval_ML_Base_Consts {
-  // all constants of the session image (its base sessions), one full name per line
+  /* the constants of the session image (its base sessions) that its plain base name refers to, one full name per
+     line: in a leaf theory of the image, the base name interns to the constant (not `hide_const (open)`, like
+     Limited_Sequence.map_seq) */
   val code: String =
-    "let val tab = fold (fn n => fn tab => fold (fn (c, _) => Symtab.update (c, ())) " +
-      "(#constants (Consts.dest (Sign.consts_of (Thy_Info.get_theory n)))) tab) (Thy_Info.get_names ()) Symtab.empty " +
-      "in writeln (cat_lines (Symtab.keys tab)) end"
+    "let val thys = map Thy_Info.get_theory (Thy_Info.get_names ()); " +
+      "val parents = fold (fn thy => fold (fn p => Symtab.update (Context.theory_long_name p, ())) " +
+        "(Theory.parents_of thy)) thys Symtab.empty; " +
+      "val leaves = filter (fn thy => not (Symtab.defined parents (Context.theory_long_name thy))) thys; " +
+      "fun add thy tab = let val consts = Sign.consts_of thy; val space = Consts.space_of consts " +
+        "in fold (fn (c, _) => fn tab => if Name_Space.intern space (Long_Name.base_name c) = c " +
+          "then Symtab.update (c, ()) tab else tab) (#constants (Consts.dest consts)) tab end " +
+      "in writeln (cat_lines (Symtab.keys (fold add leaves Symtab.empty))) end"
 
   // in the background after a session start: the base-session constants, for PIDE_MCP_Util.Qualify_Names (shadowing)
   def load(session: PIDE_MCP_Session): Unit =

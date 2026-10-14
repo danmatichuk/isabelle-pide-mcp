@@ -132,6 +132,16 @@ object PIDE_MCP_Util {
       library_theories.change(_ ++ library.map(Long_Name.base_name))
     }
 
+    /* the name to print: the full name, except when it repeats its theory qualifier, like the map function of a
+       `lift_bnf` (Seq.seq.Seq.map_seq): then the theory and the rest after the repetition (Seq.map_seq), which refers
+       to the same constant */
+    def display(name: String): String =
+      Long_Name.explode(name) match {
+        case theory :: rest if rest.nonEmpty && rest.init.contains(theory) =>
+          Long_Name.implode(theory :: rest.drop(rest.init.lastIndexOf(theory) + 1))
+        case _ => name
+      }
+
     // a constant printed by its name (not notation)
     private def qualify_name(name: String): Boolean =
       mode match {
@@ -176,7 +186,7 @@ object PIDE_MCP_Util {
             val notation_word = words == Set(text) && !delims && is_word(text) && text != name
             val plain_name = words.isEmpty && !delims && text != name && name.endsWith("." + text) &&
               (qualify_name(name) || shadows(name, text))
-            if (notation_word || plain_name) XML.Elem(markup, List(XML.Text(name)))
+            if (notation_word || plain_name) XML.Elem(markup, List(XML.Text(display(name))))
             else XML.Elem(markup, rewrite(b))
           case XML.Elem(markup, b) => XML.Elem(markup, rewrite(b))
           case text => text
