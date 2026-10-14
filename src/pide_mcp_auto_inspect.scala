@@ -57,7 +57,8 @@ object PIDE_MCP_Auto_Inspect {
   }
 
   /* infrastructure rules: of Pure or the theory HOL itself, class relations and arities (`*.super`, `arity_*`,
-     `classrel_*`), unnamed rules: counted, but not shown as top rules */
+     `classrel_*`), unnamed rules, and the sort membership rules the trace marks (OFCLASS statements, the rules
+     Axclass records for a class): counted, but not shown as top rules */
   def infrastructure(key: String): Boolean = {
     val names = Long_Name.explode(key)
     val base = names.lastOption.getOrElse("")
@@ -155,17 +156,18 @@ object PIDE_MCP_Auto_Inspect {
     // "N display<TAB>full name"
     val entries = counts.filter(_.startsWith("  ")).map(_.trim).flatMap { l =>
       val (n, rest) = l.span(_ != ' ')
-      val (display, key) = rest.trim.span(_ != '\t')
-      n.toIntOption.map(k => (k, display.trim, key.trim))
+      val (display, key_flag) = rest.trim.span(_ != '\t')
+      val (key, flag) = key_flag.drop(1).span(_ != '\t')
+      n.toIntOption.map(k => (k, display.trim, key.trim, flag.trim.nonEmpty || infrastructure(key.trim)))
     }
-    val count_lines = entries.map { case (n, display, key) => s"$n $display" + (if (infrastructure(key)) "  (infrastructure)" else "") }
-    val proper = entries.filterNot(e => infrastructure(e._3))
-    val top = proper.take(top_rules).map { case (n, display, _) => s"$display ×$n" }
+    val count_lines = entries.map { case (n, display, _, infra) => s"$n $display" + (if (infra) "  (infrastructure)" else "") }
+    val proper = entries.filterNot(_._4)
+    val top = proper.take(top_rules).map { case (n, display, _, _) => s"$display ×$n" }
     val uses = entries.map(_._1).sum
     val proper_uses = proper.map(_._1).sum
     // one rule doing most of the work: a rewrite or step repeated on many instances
     val dominant = proper match {
-      case (n1, display, _) :: rest if n1 >= 10 && (2 * n1 >= proper_uses || rest.headOption.forall(n1 >= 3 * _._1)) =>
+      case (n1, display, _, _) :: rest if n1 >= 10 && (2 * n1 >= proper_uses || rest.headOption.forall(n1 >= 3 * _._1)) =>
         Some(s"most uses: `$display` ×$n1 (of $proper_uses non-infrastructure uses): consider a more direct rule for its instances")
       case _ => None
     }

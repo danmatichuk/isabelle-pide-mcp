@@ -108,12 +108,39 @@ fun report [method_arg, criteria_arg, max_uses_arg, timeout_arg, statements_arg]
 (*trace for the automatic inspection of a slow or failed step: every use is counted (every_use), in order.
   args: method, timeout in seconds, maximum number of trace lines.
   Output: the outcome, loop warnings, "counts:" with one "  N name<TAB>full name" line per theorem (most used first,
-  with the declarations of the first use), "trace:" with one "  source: name" line per use in order.*)
+  with the declarations of the first use; "<TAB>(infrastructure)" appended for sort membership rules), "trace:" with
+  one "  source: name" line per use in order.*)
 fun use_key (Apply_Inspect.Theorem (name, _)) = Thm_Name.print name
   | use_key (Apply_Inspect.Fact name) = Thm_Name.print name
   | use_key (Apply_Inspect.Assumption (name, _)) =
       if name = Thm_Name.empty then "(assumption)" else Thm_Name.print name
   | use_key (Apply_Inspect.Rule _) = "(other rule)";
+
+(*sort membership rules: a statement OFCLASS(...), the rules Axclass records for a class (X_class_def,
+  X_class.intro, X_class.axioms) and the intro rules and axioms of its class locale (class.X.intro,
+  class.X_axioms.intro); not the class assumptions or class parameter definitions*)
+fun sort_rule ctxt =
+  let
+    val thy = Proof_Context.theory_of ctxt;
+    val axclass_rules =
+      fold (fn c => fn tab =>
+        (case try (Axclass.get_info thy) c of
+          SOME {def, intro, axioms, ...} =>
+            let
+              val (locale_intro, locale_axioms_intro) =
+                if Class.is_class thy c then Locale.intros_of thy c else (NONE, NONE);
+              val locale_axioms = if Class.is_class thy c then Locale.axioms_of thy c else [];
+            in
+              fold (fn th => Symtab.update (Thm_Name.print (Thm.derivation_name th), ()))
+                (def :: intro :: axioms @ the_list locale_intro @ the_list locale_axioms_intro @ locale_axioms) tab
+            end
+        | NONE => tab)) (Sorts.all_classes (Sign.classes_of thy)) Symtab.empty;
+  in
+    fn (key, u) => Symtab.defined axclass_rules key orelse
+      (case Apply_Inspect.use_thm ctxt u of
+        SOME th => can Logic.dest_of_class (Logic.strip_imp_concl (Thm.prop_of th))
+      | NONE => false)
+  end;
 
 fun trace [method_arg, timeout_arg, trace_max_arg] state =
       let
@@ -166,13 +193,14 @@ fun trace [method_arg, timeout_arg, trace_max_arg] state =
           Symtab.fold (fn (key, (n, u)) => cons (n, key, u)) (Synchronized.value counts) []
           |> sort (fn ((n1, k1, _), (n2, k2, _)) => prod_ord (rev_order o int_ord) string_ord ((n1, k1), (n2, k2)));
         val (n_trace, trace_lines) = Synchronized.value trace;
+        val is_sort_rule = sort_rule ctxt;
       in
         cat_lines
           (outcome :: distinct (op =) (rev (Synchronized.value loops)) @
             ["counts:"] @
             map (fn (n, key, u) =>
               "  " ^ string_of_int n ^ " " ^ (if key = "(other rule)" then key else plain (pretty_use u)) ^
-                "\t" ^ key) sorted @
+                "\t" ^ key ^ (if is_sort_rule (key, u) then "\t(infrastructure)" else "")) sorted @
             ["trace:"] @ map (fn s => "  " ^ s) (rev trace_lines) @
             (if n_trace > trace_max then ["  ... (" ^ string_of_int (n_trace - trace_max) ^ " more uses)"] else []))
       end
