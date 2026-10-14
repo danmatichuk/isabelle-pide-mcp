@@ -2,11 +2,13 @@
 
 Helper theory, loaded on demand by the `suggest_facts` tool of the PIDE MCP server.
 It registers a PIDE query operation that returns the facts that Sledgehammer's relevance filter
-(MePo/MaSh) selects for the goal at a position, without running any prover.
+(MePo/MaSh) selects for the goal at a position, without running any prover, and the same as the Isar
+command `suggest_facts [N]` (N facts, default 20) for theories that import it.
 *)
 
 theory PIDE_MCP_Suggest
   imports Main
+  keywords "suggest_facts" :: diag
 begin
 
 ML \<open>
@@ -65,6 +67,12 @@ val _ =
             writeln_result (cat_lines
               (suggest (the_default 20 (Int.fromString max_facts_arg)) (statements_arg = "true") state))
           end));
+
+val _ =
+  Outer_Syntax.command \<^command_keyword>\<open>suggest_facts\<close>
+    "list the facts that Sledgehammer's relevance filter selects for the current goal (no prover runs)"
+    (Scan.optional Parse.nat 20 >> (fn max_facts =>
+      Toplevel.keep_proof (fn st => writeln (cat_lines (suggest max_facts true (Toplevel.proof_of st))))));
 
 end;
 \<close>
