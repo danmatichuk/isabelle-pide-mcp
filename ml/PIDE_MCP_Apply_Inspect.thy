@@ -105,6 +105,85 @@ fun report [method_arg, criteria_arg, max_uses_arg, timeout_arg, statements_arg]
       end
   | report _ _ = error "Bad arguments";
 
+(*trace for the automatic inspection of a slow or failed step: every use is counted (every_use), in order.
+  args: method, timeout in seconds, maximum number of trace lines.
+  Output: the outcome, loop warnings, "counts:" with one "  N name" line per theorem (most used first, with the
+  declarations of the first use), "trace:" with one "  source: name" line per use in order.*)
+fun use_key (Apply_Inspect.Theorem (name, _)) = Thm_Name.print name
+  | use_key (Apply_Inspect.Fact name) = Thm_Name.print name
+  | use_key (Apply_Inspect.Assumption (name, _)) =
+      if name = Thm_Name.empty then "(assumption)" else Thm_Name.print name
+  | use_key (Apply_Inspect.Rule _) = "(other rule)";
+
+fun trace [method_arg, timeout_arg, trace_max_arg] state =
+      let
+        val ctxt = Proof.context_of state;
+        val pretty_use = Apply_Inspect.pretty_use ctxt;
+        val text =
+          Parse.read_embedded ctxt (Keyword.no_major_keywords (Thy_Header.get_keywords' ctxt))
+            (Scan.many Token.not_eof) (Input.string method_arg)
+          |> Method.read ctxt;
+        val timeout = Time.fromSeconds (the_default 5 (Int.fromString timeout_arg));
+        val trace_max = the_default 5000 (Int.fromString trace_max_arg);
+
+        (*key -> (count, first use); the trace in reverse order, capped*)
+        val counts = Synchronized.var "pide_mcp_apply_trace_counts" (Symtab.empty: (int * Apply_Inspect.use) Symtab.table);
+        val trace = Synchronized.var "pide_mcp_apply_trace" (0, []: string list);
+        fun on_use source u =
+          let val key = use_key u in
+            Synchronized.change counts (Symtab.map_default (key, (0, u)) (fn (n, u0) => (n + 1, u0)));
+            Synchronized.change trace (fn (n, lines) =>
+              (n + 1, if n < trace_max then (source ^ ": " ^ key) :: lines else lines))
+          end;
+        val loops = Synchronized.var "pide_mcp_apply_trace_loops" ([]: string list);
+        fun on_loop source rules =
+          let
+            val what =
+              (case source of
+                "simp" => "the simplifier"
+              | "classical" => "the classical reasoner"
+              | _ => "the proof method " ^ quote source);
+            val names = if null rules then "(no named theorems)" else commas (map use_key rules);
+          in Synchronized.change loops (cons ("*** may be looping: " ^ what ^ " repeatedly uses " ^ names ^ " ***")) end;
+        val params = {every_use = true, on_use = on_use, on_loop = on_loop};
+
+        val outcome =
+          (case Exn.capture (fn () =>
+              Timeout.apply timeout (fn () => Apply_Inspect.inspect params text state) ()) () of
+            Exn.Res {succeeded, error, uses = all} =>
+              (*a failed method reports what it tried in its result only: count each at least once*)
+              (List.app (fn u => Synchronized.change counts
+                  (Symtab.map_default (use_key u, (0, u)) (fn (n, u0) => (Int.max (n, 1), u0)))) all;
+               case error of
+                NONE => if succeeded then "succeeds" else "fails"
+              | SOME msg => "raises an error: " ^ plain_limit 300 (Pretty.str msg))
+          | Exn.Exn (Timeout.TIMEOUT _) => "did not finish within " ^ timeout_arg ^ " s (it may loop)"
+          | Exn.Exn exn =>
+              if Exn.is_interrupt_breakdown exn then "ran out of stack or memory (it may loop)"
+              else Exn.reraise exn);
+
+        val sorted =
+          Symtab.fold (fn (key, (n, u)) => cons (n, key, u)) (Synchronized.value counts) []
+          |> sort (fn ((n1, k1, _), (n2, k2, _)) => prod_ord (rev_order o int_ord) string_ord ((n1, k1), (n2, k2)));
+        val (n_trace, trace_lines) = Synchronized.value trace;
+      in
+        cat_lines
+          (outcome :: distinct (op =) (rev (Synchronized.value loops)) @
+            ["counts:"] @
+            map (fn (n, key, u) =>
+              "  " ^ string_of_int n ^ " " ^ (if key = "(other rule)" then key else plain (pretty_use u))) sorted @
+            ["trace:"] @ map (fn s => "  " ^ s) (rev trace_lines) @
+            (if n_trace > trace_max then ["  ... (" ^ string_of_int (n_trace - trace_max) ^ " more uses)"] else []))
+      end
+  | trace _ _ = error "Bad arguments";
+
+val _ =
+  Query_Operation.register {name = "pide_mcp_apply_trace", pri = Task_Queue.urgent_pri}
+    (fn {state = st, args, writeln_result, ...} =>
+      (case try Toplevel.proof_of st of
+        NONE => error "No proof state at this position"
+      | SOME state => writeln_result (trace args state)));
+
 val _ =
   Query_Operation.register {name = "pide_mcp_apply_inspect", pri = Task_Queue.urgent_pri}
     (fn {state = st, args, writeln_result, ...} =>

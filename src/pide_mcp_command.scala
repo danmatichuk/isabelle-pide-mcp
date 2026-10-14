@@ -372,6 +372,7 @@ object PIDE_MCP_Command {
       // `Bad context` after a proof left open; listed as one line per cause instead of one entry each
       var failed_proof: Option[(Int, String)] = None  // line and name of the first failure of the current proof
       val follow_on = mutable.LinkedHashMap.empty[(Int, String), mutable.ListBuffer[Int]]
+      val slow_steps = new mutable.ListBuffer[JSON.Object.T]  // finished OK, but slow enough to be inspected
       for (state <- states) {
         if (detail == Detail.full && limit.forall(count < _)) returned_commands += state.json(doc, opts)
         count += 1
@@ -393,6 +394,8 @@ object PIDE_MCP_Command {
         if (state.is_theory_command || state.kind.exists(Keyword.proof_goal)) failed_proof = None
         previous = Some((line, state.cmd.span.name))
         val problem_kinds = state.problem_kinds
+        if (problem_kinds.isEmpty && detail != Detail.summary && slow_steps.length < 5 && state.inspection.nonEmpty)
+          slow_steps += state.location_json(doc, List("slow"))
         val failure = problem_kinds.exists(Set(Status.failed, "errors"))
         val cause =
           if (problem_kinds.isEmpty || first_problem.isEmpty) None
@@ -422,6 +425,7 @@ object PIDE_MCP_Command {
       Status.prefix_keys(JSON_Object("total_timing_ms" -> total_timing_ms) ++
         JSON_Object(kinds.map(kind => kind -> counts(kind)))) ++
         JSON.optional("first_problem" -> first_problem) ++
+        JSON_Object.if_proper(slow_steps.nonEmpty, JSON_Object("slow_steps" -> slow_steps.toList)) ++
         JSON.optional("open_proof" -> open_cause.map { cause =>
           val after = cause.fold("the proof before these commands")(c => s"the command at line ${c._1} (`${c._2}`)")
           s"$open_count command(s) fail only because $after left a proof or goal open (a failed or incomplete command leaves its goal open, " +
@@ -502,6 +506,9 @@ object PIDE_MCP_Command {
           Option.when(warnings > 0)("warnings")).flatten
 
     // the command failed only because the proof before it was left open ("Bad context for command ... using reset state")
+    // the automatic inspection of a slow or failed step (pide_mcp_auto_inspect)
+    lazy val inspection: Option[JSON.Object.T] = PIDE_MCP_Auto_Inspect.json(snapshot, cmd)
+
     // a theory-level command (`lemma`, `definition`, ...), not a command inside a proof
     lazy val kind: Option[String] = snapshot.node.syntax.flatMap(_.keywords.kinds.get(cmd.span.name))
     lazy val is_theory_command: Boolean = kind.forall(Keyword.theory)
@@ -546,7 +553,8 @@ object PIDE_MCP_Command {
         Some("kinds" -> kinds),
         Option.when(status.contains(Status.running))("running_seconds" -> running_ms / 1000),
         interrupt_sent_seconds.map("interrupt_sent_seconds" -> _),
-        first_message().filter(_.nonEmpty).map("first_message" -> _)))
+        first_message().filter(_.nonEmpty).map("first_message" -> _),
+        inspection.map("inspection" -> _)))
     }
 
     def json(doc: Line.Document, opts: State.Options): JSON.Object.T = {
@@ -563,6 +571,7 @@ object PIDE_MCP_Command {
           Some("timing_ms" -> (timing_ms max running_ms)),
           interrupt_sent_seconds.map("interrupt_sent_seconds" -> _),
           Some("source" -> source),
+          inspection.map("inspection" -> _),
           outside_hint.map("hint" -> _),
           proper_list(bad).map("bad" -> _)) :::
         message_entries(results.iterator, Message_Kind.important, goal_max_lines = Some(opts.goal_max_lines)) :::

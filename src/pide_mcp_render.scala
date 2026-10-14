@@ -98,7 +98,9 @@ object PIDE_MCP_Render {
 
   private def str_list(x: Any): List[String] = list(x).map(scalar)
 
-  private def location_line(loc: Map[String, Any]): String = {
+  private def location_line(loc: Map[String, Any]): String = location_line(loc, true)
+
+  private def location_line(loc: Map[String, Any], with_inspection: Boolean): String = {
     val range = loc.get("end_line") match {
       case Some(end) => s"${scalar(loc.getOrElse("line", "?"))}-${scalar(end)}"
       case None => scalar(loc.getOrElse("line", "?"))
@@ -106,10 +108,23 @@ object PIDE_MCP_Render {
     val kinds = str_list(loc.getOrElse("kinds", Nil)).mkString(",")
     s"line $range  [$kinds]" + loc.get("running_seconds").fold("")(s => s"  (running for ${scalar(s)} s" +
       loc.get("interrupt_sent_seconds").fold("")(i => s"; interrupt sent ${scalar(i)} s ago, waiting for it to stop") + ")") +
-      loc.get("first_message").fold("")(m => "  " + scalar(m))
+      loc.get("first_message").fold("")(m => "  " + scalar(m)) +
+      loc.get("inspection").filter(_ => with_inspection).fold("")(i => inspection_lines(obj(i)).map("\n   " + _).mkString)
   }
 
-  private val entry_skip = Set("status", "timing_ms", "source", "kinds", "interrupt_sent_seconds")
+  private val entry_skip = Set("status", "timing_ms", "source", "kinds", "interrupt_sent_seconds", "inspection")
+
+  // the automatic inspection of a step: at most three lines
+  def inspection_lines(i: Map[String, Any]): List[String] =
+    if (i.get("status").contains("running")) List("auto-inspect: running (the same method in the background)")
+    else
+      (s"auto-inspect (${scalar(i.getOrElse("trigger", "?"))}): the method ${scalar(i.getOrElse("outcome", "?"))}, " +
+        s"${scalar(i.getOrElse("uses", 0))} rule uses") ::
+        str_list(i.getOrElse("loops", Nil)).take(1) :::
+        (str_list(i.getOrElse("top_rules", Nil)) match {
+          case Nil => Nil
+          case l => List("top rules: " + l.mkString(", ") + i.get("log").fold("")(l => s"; full trace: ${scalar(l)}"))
+        })
 
   private def command_lines(cmd: Map[String, Any]): List[String] = {
     val source = scalar(cmd.getOrElse("source", "")).linesIterator.toList
@@ -129,7 +144,7 @@ object PIDE_MCP_Render {
         }
       case (key, v) => entry(key, v)
     }
-    source ::: indent(3, s"[$info]" :: extra)
+    source ::: indent(3, s"[$info]" :: extra ::: cmd.get("inspection").toList.flatMap(i => inspection_lines(obj(i))))
   }
 
   private def is_full(cmd: Map[String, Any]): Boolean = cmd.contains("source")
@@ -197,7 +212,9 @@ object PIDE_MCP_Render {
     val note = state.get("note").map(n => List("note: " + scalar(n))).toList.flatten :::
       state.get("earlier_problems").map(n => "*** earlier problems: " + scalar(n) + " ***").toList
     val note_lines = note
-    val first = state.get("first_problem").map(p => List("first problem: " + location_line(obj(p))) :::
+    val slow = list(state.getOrElse("slow_steps", Nil)).map(obj)
+    val slow_lines = if (slow.isEmpty) Nil else "" :: "slow steps (inspected):" :: slow.map(location_line)
+    val first = state.get("first_problem").map(p => List("first problem: " + location_line(obj(p), false)) :::
       state.get("open_proof").map(n => "*** " + scalar(n) + " ***").toList)
     def section(key: String, title: String): List[String] =
       state.get(key).map(obj).filter(_.contains(key)).toList.flatMap { sec =>
@@ -246,7 +263,7 @@ object PIDE_MCP_Render {
     val skill_hint = Option.when(proving)(PIDE_MCP_Hints.once("proof_skill",
       "hint: proving? Load the isabelle-proof-development skill if you have not (shown once)", "")).filter(_.nonEmpty)
     val main_lines = header :: provisional.getOrElse(Nil) ::: note_lines ::: waiting_line.toList ::: synced ::: first.getOrElse(Nil) :::
-      dedupe_blocks(section("problems", "problems") ::: section("commands", "commands"))
+      dedupe_blocks(section("problems", "problems") ::: slow_lines ::: section("commands", "commands"))
     // the moment to inspect a method: it keeps running (loop?) or failed without saying what it tried
     val inspect_hint = Option.when(count("commands_still_running_possibly_nonterminating") > 0)(
       "hint: to see whether a running method loops and which rules it uses: `apply_inspect` with that method, " +

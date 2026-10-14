@@ -13,13 +13,13 @@ object Tool_Apply_Inspect {
   val file_keep: Int = 100
 
   // the complete list in a file of its own, for grep; the newest file_keep files are kept
-  def write_file(session_id: String, text: String): String = {
+  def write_file(session_id: String, text: String, prefix: String = "apply_inspect"): String = {
     val dir = Path.explode(file_dir).absolute
     Isabelle_System.make_directory(dir)
     val ignore = dir + Path.basic(".gitignore")  // keep the files out of the project's git status
     if (!ignore.is_file) File.write(ignore, "*\n")
     val stamp = Date.Format("uuuuMMdd-HHmmss-SSS")(Date.now())
-    val file = dir + Path.basic(s"apply_inspect_${session_id}_$stamp.txt")
+    val file = dir + Path.basic(s"${prefix}_${session_id}_$stamp.txt")
     File.write(file, text)
     Option(dir.file.listFiles).toList.flatten.filter(_.getName.endsWith(".txt"))
       .sortBy(_.getName).dropRight(file_keep).foreach(_.delete())
@@ -28,6 +28,18 @@ object Tool_Apply_Inspect {
 }
 
 class Tool_Apply_Inspect extends PIDE_MCP_Tool("apply_inspect") {
+  // automatic inspection of slow or failed steps, one inspector per session (HOL-based sessions only)
+  private val inspectors = Synchronized(Map.empty[String, PIDE_MCP_Auto_Inspector])
+
+  override def start(sessions: PIDE_MCP_Sessions, session: PIDE_MCP_Session, progress: Progress): Unit =
+    if (session.options.bool("pide_mcp_auto_inspect") && List("Main", "HOL.Main").exists(session.resources.loaded_theory)) {
+      val inspector = new PIDE_MCP_Auto_Inspector(session)
+      inspectors.change(_ + (session.id -> inspector))
+    }
+
+  override def stop(sessions: PIDE_MCP_Sessions, session: PIDE_MCP_Session, progress: Progress): Unit =
+    inspectors.change_result(m => (m.get(session.id), m - session.id)).foreach(_.stop())
+
   def description: String =
     "Run a proof method on the goal at a position and report the theorems it used, without modifying the file: " +
       "**for a method that fails, it shows what the method tried** (simp rules it rewrote with, rules of the " +

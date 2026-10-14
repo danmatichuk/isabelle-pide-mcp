@@ -3,6 +3,7 @@ module = $ISABELLE_PIDE_MCP_JAR
 requirements = env:ISABELLE_SCALA_JAR
 sources = \
   src/pide_mcp.scala \
+  src/pide_mcp_auto_inspect.scala \
   src/pide_mcp_command.scala \
   src/pide_mcp_name_space.scala \
   src/pide_mcp_ml_statistics.scala \

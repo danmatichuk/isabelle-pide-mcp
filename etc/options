@@ -23,3 +23,12 @@ option pide_mcp_sync_diff_dir : string = ".pide_mcp/sync_diffs" for pide_mcp
 
 option pide_mcp_tools : string = "*" for pide_mcp
   -- "comma-separated names of tools to serve or \"*\" to serve all"
+
+option pide_mcp_auto_inspect : bool = true for pide_mcp
+  -- "inspect slow or failed apply/by steps automatically with apply_inspect (HOL-based sessions)"
+
+option pide_mcp_auto_inspect_after : real = 5.0 for pide_mcp
+  -- "inspect an apply/by step that is still running after this many seconds (failed steps at once)"
+
+option pide_mcp_auto_inspect_timeout : int = 5 for pide_mcp
+  -- "method timeout of an automatic inspection (seconds)"
