@@ -346,7 +346,7 @@ object PIDE_MCP_Command {
 
     val default_source_max_lines: Int = 5
     val default_info_max_lines: Int = 30
-    val default_goal_max_lines: Int = 100
+    val default_goal_max_lines: Int = 40
     val default_problems_limit: Int = 10
 
     def states_json(

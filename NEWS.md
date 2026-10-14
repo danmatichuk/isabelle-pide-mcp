@@ -4,6 +4,7 @@ PIDE MCP NEWS -- history of user-relevant changes
 New in this PIDE MCP version
 ----------------------------
 
+* `get_state`: the default `goal_max_lines` is 40 (before: 100), for goals and goals inside error messages, with a cap of 40 × 200 characters; raise it for more.
 * `get_state` points to `apply_inspect` where it helps: a one-line hint while a command is `still_running_possibly_nonterminating` (whether it loops, which rules it uses), and in the failing-proof hint (what a failing method tried).
 * `isabelle-proof-development` skill, traps: `thm[simplified]` normalises numerals (`1` becomes `Suc 0` for nat); name the rules (`[simplified add_0]`, `[unfolded …]`) or give the instance.
 * The first `get_state` of a server run that shows a `sorry`, a failure or an open proof ends with `hint: proving? Load the isabelle-proof-development skill if you have not (shown once)`; it is never repeated.
