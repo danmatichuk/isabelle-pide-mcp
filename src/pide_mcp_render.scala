@@ -106,7 +106,8 @@ object PIDE_MCP_Render {
       case None => scalar(loc.getOrElse("line", "?"))
     }
     val kinds = str_list(loc.getOrElse("kinds", Nil)).mkString(",")
-    s"line $range  [$kinds]" + loc.get("running_seconds").fold("")(s => s"  (running for ${scalar(s)} s" +
+    s"line $range  [$kinds]" + loc.get("running_seconds").fold("")(s => "  (running for " +
+      loc.get("running_ms").fold(s"${scalar(s)} s")(ms => s"${scalar(ms)} ms") +
       loc.get("interrupt_sent_seconds").fold("")(i => s"; interrupt sent ${scalar(i)} s ago, waiting for it to stop") + ")") +
       loc.get("first_message").fold("")(m => "  " + scalar(m)) +
       loc.get("inspection").filter(_ => with_inspection).fold("")(i => inspection_lines(obj(i)).map("\n   " + _).mkString)
@@ -210,8 +211,10 @@ object PIDE_MCP_Render {
   def get_state_text(json: JSON.T, max_lines: Int = 0): String = {
     val state = obj(json)
     def count(key: String): Int = state.get(key).collect { case n: Int => n; case n: Long => n.toInt }.getOrElse(0)
-    val kinds = List("still_running_possibly_nonterminating", "warned", "failed", "canceled",
-      "bad", "unprocessed", "finished").map(k => k -> count("commands_" + k)) :::
+    val briefly = count("commands_running_briefly")
+    val kinds = ("running" -> briefly) ::
+      ("still_running_possibly_nonterminating" -> (count("commands_still_running_possibly_nonterminating") - briefly)) ::
+      List("warned", "failed", "canceled", "bad", "unprocessed", "finished").map(k => k -> count("commands_" + k)) :::
       List("errors" -> count("errors"), "warnings" -> count("warnings"))
     val total = scalar(obj(state.getOrElse("commands", Map.empty)).getOrElse("count", 0))
     val header = s"$total commands" + s", ${scalar(state.getOrElse("total_timing_ms", 0))} ms" +
@@ -274,7 +277,7 @@ object PIDE_MCP_Render {
     val main_lines = header :: provisional.getOrElse(Nil) ::: note_lines ::: waiting_line.toList ::: synced ::: first.getOrElse(Nil) :::
       dedupe_blocks(section("problems", "problems") ::: slow_lines ::: section("commands", "commands"))
     // the moment to inspect a method: it keeps running (loop?) or failed without saying what it tried
-    val inspect_hint = Option.when(count("commands_still_running_possibly_nonterminating") > 0)(
+    val inspect_hint = Option.when(count("commands_still_running_possibly_nonterminating") > briefly)(
       "hint: to see whether a running method loops and which rules it uses: `apply_inspect` with that method, " +
         "`start_line` = the line before it, `method_timeout: 5`")
     val hint_lines = hint.toList ::: inspect_hint.toList ::: message_hint_lines ::: skill_hint.toList

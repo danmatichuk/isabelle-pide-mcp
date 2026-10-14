@@ -15,6 +15,9 @@ object PIDE_MCP_Command {
     val unprocessed = "unprocessed"
     // experimental verbose name: remind agents of possible non-termination
     val running = "still_running_possibly_nonterminating"
+    // a command that has run for less than brief_ms is labelled just "running" (the status itself is the same)
+    val running_briefly = "running"
+    @volatile var brief_ms: Long = 5000
     val warned = "warned"
     val failed = "failed"
     val finished = "finished"
@@ -378,6 +381,7 @@ object PIDE_MCP_Command {
         count += 1
         total_timing_ms += state.timing_ms
         for (flag <- state.status) counts(flag) += 1
+        if (state.running_briefly) counts(Status.running_briefly) += 1
         counts("bad") += state.bad.length
         counts("errors") += state.errors
         counts("warnings") += state.warnings
@@ -424,6 +428,8 @@ object PIDE_MCP_Command {
         "errors", "warnings", Status.unprocessed, Status.finished)
       Status.prefix_keys(JSON_Object("total_timing_ms" -> total_timing_ms) ++
         JSON_Object(kinds.map(kind => kind -> counts(kind)))) ++
+        // a subset of commands_still_running_possibly_nonterminating: running for less than brief_ms
+        JSON_Object("commands_running_briefly" -> counts(Status.running_briefly)) ++
         JSON.optional("first_problem" -> first_problem) ++
         JSON_Object.if_proper(slow_steps.nonEmpty, JSON_Object("slow_steps" -> slow_steps.toList)) ++
         JSON.optional("open_proof" -> open_cause.map { cause =>
@@ -490,6 +496,12 @@ object PIDE_MCP_Command {
     lazy val interrupt_sent_seconds: Option[Long] =
       if (status.contains(Status.running)) Running_Clock.interrupt_sent_ago(snapshot, cmd).map(_.ms / 1000) else None
 
+    lazy val running_briefly: Boolean = status.contains(Status.running) && running_ms < Status.brief_ms
+
+    // the status as shown: "running" instead of the nonterminating label while it has run only briefly
+    lazy val shown_status: List[String] =
+      if (running_briefly) status.map(s => if (s == Status.running) Status.running_briefly else s) else status
+
     lazy val running_ms: Long =
       if (status.contains(Status.running)) timing_ms max Running_Clock.elapsed_ms(snapshot, cmd) else 0L
     lazy val errors: Int = results.count(Protocol.is_error)
@@ -498,7 +510,7 @@ object PIDE_MCP_Command {
 
     // the problem kinds of this command: relevant status flags, bad, errors, warnings
     lazy val problem_kinds: List[String] =
-      status.filter(flag => flag != Status.unprocessed && flag != Status.finished) :::
+      shown_status.filter(flag => flag != Status.unprocessed && flag != Status.finished) :::
         List(
           Option.when(bad.nonEmpty)("bad"),
           Option.when(errors > 0)("errors"),
@@ -555,6 +567,7 @@ object PIDE_MCP_Command {
         Option.when(end_line > line)("end_line" -> end_line),
         Some("kinds" -> kinds),
         Option.when(status.contains(Status.running))("running_seconds" -> running_ms / 1000),
+        Option.when(running_briefly)("running_ms" -> running_ms),
         interrupt_sent_seconds.map("interrupt_sent_seconds" -> _),
         first_message().filter(_.nonEmpty).map("first_message" -> _),
         inspection.map("inspection" -> _)))
@@ -570,7 +583,7 @@ object PIDE_MCP_Command {
         else PIDE_MCP_Util.numbered_lines(source_lines, source_line)
       val entries: List[Option[JSON.Object.Entry]] =
         List(
-          Some("status" -> status),
+          Some("status" -> shown_status),
           Some("timing_ms" -> (timing_ms max running_ms)),
           interrupt_sent_seconds.map("interrupt_sent_seconds" -> _),
           Some("source" -> source),
