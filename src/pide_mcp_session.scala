@@ -179,6 +179,7 @@ class PIDE_MCP_Session private(
         }
     }
   session.commands_changed += running_consumer
+  PIDE_MCP_Util.Qualify_Names.init(options, resources.session_base.loaded_theories.keys)
 
   def runtime_statistics(): List[Properties.T] = statistics.value.toList
 

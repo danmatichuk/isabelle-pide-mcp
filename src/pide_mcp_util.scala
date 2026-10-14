@@ -90,5 +90,73 @@ object PIDE_MCP_Util {
     intersect_range(Text.Range.length(text), range)
 
   def elem_body_plain_text(elem: XML.Elem): String =
-    Pretty.string_of(elem.body, pure = true)
+    Pretty.string_of(Qualify_Names.body(elem.body), pure = true)
+
+  /* Constants that hide behind a word in the MCP's output are printed with their full name (pide_mcp_qualify_names).
+     Isabelle itself already qualifies a name that is ambiguous in the context (`Foo.map`, `list.map`), but a notation
+     whose only token is a word (`notation my_map ("map")`, e.g. from an included bundle) prints exactly like the
+     library's `map`: such a word is replaced by the constant's full name (`Foo.my_map`). Notation with symbols or
+     several tokens (`@`, `∀x.`, `if … then … else`, `THE x.`) prints as before. Modes: notation (default), outside_base
+     (also every constant of a theory outside the base sessions), all (every constant), none. Only the MCP's copy of
+     the messages is rewritten (its markup), not the prover's printing: the user's editor is not affected. */
+  object Qualify_Names {
+    @volatile private var mode = "notation"  // notation | outside_base | all | none
+    private val base_theories = Synchronized(Set.empty[String])  // base names of the theories of base sessions
+
+    def init(options: Options, base: Iterable[String]): Unit = {
+      mode = options.string("pide_mcp_qualify_names")
+      base_theories.change(_ ++ base.map(Long_Name.base_name))
+    }
+
+    // a constant printed by its name (not notation)
+    private def qualify_name(name: String): Boolean =
+      mode match {
+        case "all" => true
+        case "outside_base" => !base_theories.value.contains(Long_Name.explode(name).headOption.getOrElse(""))
+        case _ => false
+      }
+
+    private def is_word(s: String): Boolean =
+      s.nonEmpty && Symbol.is_ascii_letter(s.head) && s.forall(c => Symbol.is_ascii_letdig(c) || c == '.')
+
+    // the syntax tokens of each constant in a message: literal words, and whether it has symbol delimiters
+    private def notations(body: XML.Body): Map[String, (Set[String], Boolean)] = {
+      var result = Map.empty[String, (Set[String], Boolean)]
+      def tokens(tree: XML.Tree): List[(Boolean, String)] = tree match {
+        case XML.Elem(Markup(Markup.LITERAL, _), b) => List((true, XML.content(b)))
+        case XML.Elem(Markup(Markup.DELIMITER, _), b) => List((false, XML.content(b)))
+        case XML.Elem(_, b) => b.flatMap(tokens)
+        case _ => Nil
+      }
+      def traverse(tree: XML.Tree): Unit = tree match {
+        case XML.Elem(Markup.Entity(Markup.CONSTANT, name), b) =>
+          val (words, delims) = b.flatMap(tokens).partition(_._1)
+          val (w0, d0) = result.getOrElse(name, (Set.empty[String], false))
+          result += (name -> (w0 ++ words.map(_._2), d0 || delims.nonEmpty))
+          b.foreach(traverse)
+        case XML.Elem(_, b) => b.foreach(traverse)
+        case _ =>
+      }
+      body.foreach(traverse)
+      result
+    }
+
+    def body(body: XML.Body): XML.Body =
+      if (mode == "none") body
+      else {
+        val syntax = notations(body)
+        def rewrite(body: XML.Body): XML.Body = body.map {
+          case XML.Elem(markup @ Markup.Entity(Markup.CONSTANT, name), b) if name.nonEmpty =>
+            val text = XML.content(b)
+            val (words, delims) = syntax.getOrElse(name, (Set.empty[String], false))
+            val notation_word = words == Set(text) && !delims && is_word(text) && text != name
+            val plain_name = words.isEmpty && !delims && text != name && name.endsWith("." + text) && qualify_name(name)
+            if (notation_word || plain_name) XML.Elem(markup, List(XML.Text(name)))
+            else XML.Elem(markup, rewrite(b))
+          case XML.Elem(markup, b) => XML.Elem(markup, rewrite(b))
+          case text => text
+        }
+        rewrite(body)
+      }
+  }
 }
