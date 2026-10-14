@@ -30,6 +30,7 @@ sources = \
   src/pide_mcp_tool_util.scala \
   src/pide_mcp_theory.scala \
   src/pide_mcp_util.scala \
+  src/Tools/tool_apply_inspect.scala \
   src/Tools/tool_cancel.scala \
   src/Tools/tool_create_file.scala \
   src/Tools/tool_create_scratch.scala \
@@ -48,6 +49,7 @@ sources = \
   src/Tools/tool_unload.scala
 services = \
   isabelle.pide.mcp.PIDE_MCP_Application \
+  isabelle.pide.mcp.Tools_Apply_Inspect \
   isabelle.pide.mcp.Tools_Cancel \
   isabelle.pide.mcp.Tools_Create_File \
   isabelle.pide.mcp.Tools_Create_Scratch \

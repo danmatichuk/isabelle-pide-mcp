@@ -22,7 +22,7 @@ object Tool_Suggest_Facts {
   ): Unit = {
     // a helper that imports Main would load all of HOL from source without HOL in the base session
     if (needs_hol && !List("Main", "HOL.Main").exists(session.resources.loaded_theory))
-      error(s"Fact suggestions need Sledgehammer: the session ${quote(session.id)}" +
+      error(s"${what.capitalize} needs a session based on HOL: the session ${quote(session.id)}" +
         " is not based on HOL (theory Main is not part of its base session).")
     val node_name = session.node_name(Path.explode(helper).expand.implode)
     var snapshot =

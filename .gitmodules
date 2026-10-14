@@ -1,0 +1,3 @@
+[submodule "deps/apply_inspect"]
+	path = deps/apply_inspect
+	url = git@github.com:danmatichuk/apply_inspect.git
