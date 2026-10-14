@@ -266,7 +266,7 @@ object PIDE_MCP_Auto_Inspect {
     val log = Option.when(count_lines.nonEmpty || suggestions.nonEmpty)(Exn.result(Tool_Apply_Inspect.write_file(session_id,
       cat_lines(List(s"trigger: $trigger") :::
         (if (!inspected) Nil
-         else ("outcome: " + (if (scenario.nonEmpty) outcome else head.headOption.getOrElse("?"))) :: head.drop(1) :::
+         else ("outcome: " + outcome) :: head.drop(1).filterNot(l => l.startsWith("scenario: ") || l.startsWith("subgoals")) :::
           goal_log_lines :::
           ("counts (uses, theorem):" :: count_lines.map("  " + _))) :::
         suggested_lines :::
