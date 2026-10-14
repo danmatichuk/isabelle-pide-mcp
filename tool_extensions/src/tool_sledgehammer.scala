@@ -9,8 +9,7 @@ import isabelle.pide.mcp._
 
 class Tool_Sledgehammer extends PIDE_MCP_Tool("sledgehammer") {
   def description: String =
-    "Run sledgehammer on the goal of the command at the given line without modifying the file. " +
-      "Returns the suggested proof snippets. " +
+    "Run sledgehammer on the goal after the command at `start_line`, without modifying the file; returns proof snippets. " +
       PIDE_MCP_Tool_Schema.implicit_load_file
 
   private val provers_arg = PIDE_MCP_Tool_Arg.string_default(
@@ -22,7 +21,7 @@ class Tool_Sledgehammer extends PIDE_MCP_Tool("sledgehammer") {
     "try0", "Try standard integrated provers with the found facts before external provers.", true)
   private val prefix_arg = PIDE_MCP_Tool_Arg.opt_string(
     "prefix",
-    "Prefix of the line. Sledgehammer runs on the state after the prefix. Omit to use end of the line.")
+    "Run after this prefix of the line instead of its end.")
   private val proofs_limit_arg = PIDE_MCP_Tool_Arg.int_default(
     "proofs_limit", "Maximium number of proofs to be found.", 1, minimum = Some(1))
   private val timeout_arg = PIDE_MCP_Tool_Arg.opt_int(

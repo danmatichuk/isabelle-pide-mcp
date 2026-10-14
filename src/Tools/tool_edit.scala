@@ -187,18 +187,10 @@ object Tool_Edit {
 
 class Tool_Edit extends PIDE_MCP_Tool("edit") {
   def description: String =
-    "Edit a file by either replacing, prepending to, or appending to a matching old text in a given range. " +
-      "Returns once Isabelle has processed the edit, which takes longer if the origin's dependencies were not loaded yet. " +
-      "The result's `reprocessed` tells how many loaded theories and commands the edit makes Isabelle process again " +
-      "(the file and everything importing it) and how long processing them took before, as an estimate of the cost; batch edits if it is high. " +
-      "With `check`, `edited_range` lists the problems and warnings of the edited commands themselves (the file summary alone hides warnings and writeln output). " +
-      "Issue edits to one file one after the other: edits sent in parallel, or an edit while a command of the file is still running, give a provisional check. " +
-      "The time is that of the last processing, which is often cached: a cold reload (after a restart or a change below) takes longer. " +
-      "Note: base session files are static and cannot be edited. " +
-      "Lines outside the edited range keep their on-disk text byte for byte (including literal Unicode symbols); " +
-      "`old_text` is matched with symbols in Unicode form, so `\\<rightarrow>` and `→` are equivalent. " +
-      PIDE_MCP_Tool_Schema.range_visibility + " " +
-      PIDE_MCP_Tool_Schema.implicit_reload_file
+    "Replace, prepend to or append to `old_text` in a line range of a file, and return as soon as the text is written; then " +
+      "call `get_state`. `reprocessed` estimates the cost: the theories and commands processed again and their previous time. " +
+      "Edits to one file one after the other. Lines outside the edit keep their disk text; `old_text` matches symbols in " +
+      "either form (`\\<rightarrow>` = `→`). Base session files cannot be edited."
 
   private val mode_arg = PIDE_MCP_Tool_Arg.default(
     "mode", "Edit mode",
@@ -206,33 +198,27 @@ class Tool_Edit extends PIDE_MCP_Tool("edit") {
   private val text_arg = PIDE_MCP_Tool_Arg.string("text", "New text to write")
   private val old_text_arg = PIDE_MCP_Tool_Arg.string(
     "old_text",
-    "Text to find as a substring within the given range. If old_text is empty, the whole text in range is selected instead.")
+    "Text to find in the range; empty: the whole range.")
   private val edit_all_arg = PIDE_MCP_Tool_Arg.bool_default(
     "edit_all",
     "Edit every match or just a unique occurrence.", false)
 
   private val check_wait_arg = PIDE_MCP_Tool_Arg.int_default(
     "check_wait_seconds",
-    "With `check`: wait up to this many seconds for the file (and its imports) to settle before the status is taken. " +
-      "0: do not wait.",
+    "With `check`: how long to wait for the file to be processed.",
     30, minimum = Some(0), maximum = Some(600))
   private val check_ml_arg = PIDE_MCP_Tool_Arg.bool_default(
     "check_ml",
-    "For an ML file (`.ML`): check the new text for ML syntax errors BEFORE writing it (`check_ml` tool; no session, no reload) and, if there are any, " +
-      "do not write the file and say so. Without this, such an edit reloads the file and everything that depends on it just to report the error. " +
-      "Set to false only if the check is wrong (it does not run the code, so it cannot judge names and types).",
+    "For an `.ML` file: do not write text with an ML syntax error (as `check_ml`; avoids a reload just to see the error). " +
+      "false: write anyway.",
     true)
   private val cancel_after_arg = PIDE_MCP_Tool_Arg.int_default(
     "cancel_after_seconds",
-    "Time limit per command for a theory: interrupt any command of the edited lines that is still running after this many " +
-      "seconds (it then shows as `canceled`, as with the `cancel` tool). 0: no limit.",
+    "Time limit: interrupt (as `cancel`) any edited command still running after this many seconds. 0: none.",
     0, minimum = Some(0), maximum = Some(3600))
   private val check_arg = PIDE_MCP_Tool_Arg.bool_default(
     "check",
-    "Opt-in: also wait (up to `check_wait_seconds`) for the file to be processed and return the status of the whole file " +
-      "(counts of failed commands, errors,... and the first problem). The call blocks while slow commands run. " +
-      "Default: return right after writing; then call `get_state` (no waiting needed): commands still running after " +
-      "a few seconds are a hint to replace a slow method.",
+    "Opt-in: wait for processing and return the file's status (blocks while slow commands run; prefer `get_state`).",
     false)
 
   def input_schema: JSON.Object.T = PIDE_MCP_Tool_Schema.input_schema(

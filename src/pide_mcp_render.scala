@@ -25,8 +25,7 @@ object PIDE_MCP_Render {
       { case mode: String => values.find(_.toString == mode); case _ => None },
       _.toString)
     val description: String =
-      "Output format. `text` is a compact human-readable rendering, `json` is the structured JSON " +
-        "(also returned as structured content)."
+      "`text` (compact) or `json`."
     def arg: PIDE_MCP_Tool_Arg[Output_Format] =
       PIDE_MCP_Tool_Arg.default("format", description, format, default)
   }
@@ -216,12 +215,10 @@ object PIDE_MCP_Render {
       }
       val ml_errors = list(sync.getOrElse("files", Nil)).map(obj).flatMap(_.get("ml_syntax_error")).map(scalar)
       List("external edits synced: " + files.mkString(", ") +
-
         ml_errors.map("\n*** " + _ + " ***").mkString +
         sync.get("diff_file").fold("") { f =>
           val path = scalar(f)
-          s"\nfull diff: $path\nACTION REQUIRED: the user cannot see this tool output. In your next reply, include this link verbatim: " +
-            s"[sync diff]($path). Do not read the file."
+          s"\nfull diff: $path"  // for the human (the PostToolUse hook shows it); nothing for the agent to do
         })
     }
     val waiting = list(state.getOrElse("waiting_for", Nil)).map(obj).map(w =>

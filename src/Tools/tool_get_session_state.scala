@@ -129,20 +129,14 @@ object Tool_Get_Session_State {
 
 class Tool_Get_Session_State extends PIDE_MCP_Tool("get_session_state") {
   def description: String =
-    "Inspect the state of running PIDE sessions, their theories (including status and progress), their resource statistics, and the currently running commands. " +
-      "**Use this for a global overview, e.g. when you think the prover is stuck or you want to know what is being processed.** " +
-      "Note that sorrys are not listed. " +
-      "Command counts per theory include whitespace and comment spans, so they are larger than in `get_state`. " +
-      "The `machine` block shows the machine's free memory and what all Isabelle java/poly processes (of all servers, not only this one) use; " +
-      "other Isabelle instances (e.g. the VS Code Isabelle extension) count against the machine's memory as well. " +
+    "Overview of the running sessions: theories with status and progress, running commands, memory (`machine`: free memory " +
+      "and all Isabelle processes of the user). Use it when the prover seems stuck. Sorrys are not listed; command counts " +
+      "include whitespace spans. " +
       PIDE_MCP_Tool_Schema.sync_disk_edits
 
   private val filter_origins_arg = PIDE_MCP_Tool_Arg.dictionary_default(
     "filter_origins",
-    "Mapping from session id to dynamic origins (session-qualified theory names or file paths). " +
-      "If provided for a session, only returns theory information and running commands for those origins. " +
-      "Sessions without an entry include all their dynamic theories. " +
-      "Does not affect resource statistics.",
+    "Session id -> origins: restrict that session's theories and running commands to these.",
     PIDE_MCP_Tool_Arg.Format.list(PIDE_MCP_Tool_Arg.Format.string),
     VectorMap.empty)
   private val include_commands_running_arg = PIDE_MCP_Tool_Arg.bool_default(
@@ -151,29 +145,22 @@ class Tool_Get_Session_State extends PIDE_MCP_Tool("get_session_state") {
     "include_theory_status", "Include the status and progress of theories.", true)
   private val include_failures_arg = PIDE_MCP_Tool_Arg.bool_default(
     "include_failures",
-    "For each theory with failed commands, include the first failing command (line and first message line, no source) " +
-      "and the line numbers of failing commands (capped at 20). The first failure is usually the cause of the later ones. " +
-      "Use this to locate errors before calling `get_state` on a narrow line range. Costs a pass over each theory.",
+    "Per theory with failures: the first failing command and the lines of failing commands (up to 20).",
     false)
   private val format_arg = PIDE_MCP_Render.Output_Format.arg
   private val include_loaded_theories_arg = PIDE_MCP_Tool_Arg.bool_default(
     "include_loaded_theories", "List loaded theories per session.", false)
   private val include_session_dirs_arg = PIDE_MCP_Tool_Arg.bool_default(
     "include_session_dirs",
-    "List directories from which the session attempts to load files. " +
-      "Use this when you want to learn what libraries you have access to and where they are located. " +
-      "Note that session names, which you have to use for session-qualified loading of (library) theories, are stored in the ROOT files of these directories.",
+    "List the session directories (available libraries; their ROOT files name the sessions for qualified imports).",
     false)
   private val include_options_arg = PIDE_MCP_Tool_Arg.default(
     "include_options",
-    "List Isabelle session options. " +
-      s"Use ${quote("changed")} to only show options that differ from their default value and " +
-      s"${quote("true")} to show all options.",
+    s"List Isabelle options: ${quote("changed")} (non-default ones) or ${quote("true")} (all).",
     Tool_Get_Session_State.Options_Mode.format, Tool_Get_Session_State.Options_Mode.default)
   private val include_statistics_arg = PIDE_MCP_Tool_Arg.bool_default(
     "include_statistics",
-    "Include each session's recent Isabelle/ML statistics (heap, threads,...), their summary, and the MCP server's JVM statistics (heap, threads,...). " +
-      "Use this to check memory consumption and when you think the server is stuck.",
+    "Include recent ML and JVM statistics (heap, threads).",
     false)
 
   def input_schema: JSON.Object.T = PIDE_MCP_Tool_Schema.input_schema(

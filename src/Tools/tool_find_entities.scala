@@ -19,18 +19,18 @@ class Tool_Find_Entities extends PIDE_MCP_Tool("find_entities") {
       Markup.DOCUMENT_ANTIQUOTATION, Markup.DOCUMENT_ANTIQUOTATION_OPTION)
 
   def description: String =
-    "Look up what entities (constants, theorems, commands, methods, ML terms,...) in a file are defined where and how, i.e. find their origin with preview snippets. " +
-      "Useful to learn more about concepts that you are uncertain about or for which you need more information (e.g. the actual theorem statement) and to study the content of a file. To get all entities defined in a file, select the file with full range and also pass it in filter_origins. " +
+    "Where and how the entities (constants, theorems, methods, ML names,...) used in a line range are defined, with source " +
+      "snippets. For all entities a file defines: its full range, and the file in `filter_origins`. " +
       PIDE_MCP_Tool_Schema.implicit_load_file + " " +
       PIDE_MCP_Tool_Schema.sync_disk_edits
 
   private val snippet_lines_arg = PIDE_MCP_Tool_Arg.int_default(
     "snippet_lines",
-    "Number of context lines per definition source snippet (use 0 to omit).",
+    "Lines per definition snippet (0: none).",
     snippet_preview_lines, minimum = Some(0))
   private val filter_origins_arg = PIDE_MCP_Tool_Arg.strings_default(
     "filter_origins",
-    "List of origins (session-qualified theory names or file paths). If non-empty, only returns entities whose definition originates from one of these. Use this if you want to explore the entities defined by a given origin.",
+    "Only entities defined in these origins.",
     Nil)
 
   private val format_arg = PIDE_MCP_Render.Output_Format.arg

@@ -20,12 +20,9 @@ object Tool_Get_State {
 
 class Tool_Get_State extends PIDE_MCP_Tool("get_state") {
   def description: String =
-    "Inspect the state of a (range in a) file: goals, variables, errors, warnings, etc. " +
-      "Returns a summary (errors, warnings, commands still running, total timing,...) and details for all commands in range. " +
-      "**Use this frequently to check if you are making progress, what is left to be done, and importantly, if certain commands are still processing, potentially even looping.** " +
-      "For non-theory files, the response has a single command entry derived from the command that loaded it in the respective theory. " +
-      PIDE_MCP_Tool_Schema.implicit_load_file + " " +
-      PIDE_MCP_Tool_Schema.sync_disk_edits
+    "State of a file or line range: status counts, problems (failed, errors, `bad` = sorry, warnings, still running with " +
+      "their running time), goals and messages. Use it after every edit, without waiting; narrow `start_line`/`end_line` to the " +
+      "commands you work on. An ML file shows as the one command that loads it. Loads the file if needed and picks up edits made on disk."
 
   private val include_types_arg = PIDE_MCP_Tool_Arg.bool_default(
     "include_types",
@@ -35,80 +32,60 @@ class Tool_Get_State extends PIDE_MCP_Tool("get_state") {
     "Include facts/theorems used in range.", false)
   private val include_infos_arg = PIDE_MCP_Tool_Arg.bool_default(
     "include_infos",
-    "Include writeln and information output in the state (`full` detail only). This can get large, but often contains useful information. Avoid using it for large ranges if possible.",
+    "Include writeln/information output (`full` detail only; large: use narrow ranges).",
     false)
   private val include_full_markup_arg = PIDE_MCP_Tool_Arg.bool_default(
     "include_full_markup",
-    "Include full PIDE markup information. This gets very large - **use only sparingly and very targeted to get local details**.",
+    "Include full PIDE markup (very large: narrow ranges only).",
     false)
   private val commands_limit_arg = PIDE_MCP_Tool_Arg.opt_int(
     "commands_limit",
-    "Maximum number of commands to return in the plain commands list (`full` detail only). Omit to return all commands. " +
-      "Set to 0 to omit the plain commands list; the problems are still listed according to `detail` (use `detail: summary` for counts only). " +
-      "Note that the returned summary will count all commands, even the truncated ones. " +
-      "Warning: for large ranges, there are thousands of commands that may flood your context. Set the commands limit to 0 if you do not need details.",
+    "Maximum number of commands in the plain commands list; a positive value implies `detail: full`, 0 omits the list " +
+      "(problems are still listed). Counts always cover all commands.",
     minimum = Some(0))
 
   private val detail_arg = PIDE_MCP_Tool_Arg.optional(
     "detail",
-    "How much to return. " +
-      "`summary`: only counts (running, failed, bad, errors,...), total timing and the first failing command. " +
-      "`locations`: additionally one compact entry per problematic command (line range, problem kinds, first message line, no source). " +
-      "`full`: full command details (source, all messages) for problematic commands and for the plain commands list. " +
-      "Each problematic command appears once, with its problem kinds listed. " +
-      "Default: `full` if `commands_limit` is positive, `locations` otherwise (in particular for `commands_limit` 0). " +
-      "`commands_limit` never hides the messages of listed problems; only `detail` and `problems_limit` do.",
+    "`summary`: counts and the first problem. `locations` (default): one line per problem (lines, kinds, first message). " +
+      "`full`: sources and all messages (use it on a line range to read a cut message or a goal).",
     PIDE_MCP_Command.State.Detail.format)
   private val problems_limit_arg = PIDE_MCP_Tool_Arg.int_default(
     "problems_limit",
-    "Maximum number of problematic commands to return (in file order). The summary still counts all of them. " +
-      "The first failing command, usually the cause of the following failures, is always reported.",
+    "Maximum number of problems listed (in file order); the first failure, usually the cause of later ones, is always reported.",
     PIDE_MCP_Command.State.default_problems_limit, minimum = Some(0))
   private val source_max_lines_arg = PIDE_MCP_Tool_Arg.int_default(
     "source_max_lines",
-    "Maximum number of source lines shown per command (`full` detail only); longer commands are cut with a marker. " +
-      "You know the file and the line numbers, so the first lines suffice to identify a command.",
+    "Source lines shown per command (`full` detail).",
     PIDE_MCP_Command.State.default_source_max_lines, minimum = Some(1))
 
   private val include_ml_echo_arg = PIDE_MCP_Tool_Arg.bool_default(
     "include_ml_echo",
-    "With `include_infos`: keep the echo of top-level ML declarations (`val x = ...`, `structure ...`, etc.). " +
-      "Set to false to see only explicit output (`writeln`, ...). Detected heuristically by the message's first words.",
+    "With `include_infos`: keep the echo of top-level ML declarations (`val x = ...`); false: explicit output only.",
     true)
   private val info_max_lines_arg = PIDE_MCP_Tool_Arg.int_default(
     "info_max_lines",
-    "Maximum number of lines per writeln/information/tracing message with `include_infos`; longer ones are cut with a marker. " +
-      "ML top-level bindings echo their values, which can be very long.",
+    "Lines per message with `include_infos`.",
     PIDE_MCP_Command.State.default_info_max_lines, minimum = Some(1))
 
   private val max_output_lines_arg = PIDE_MCP_Tool_Arg.int_default(
     "max_output_lines",
-    "Hard cap on the lines of the text result (`text` format): longer output is cut after this many lines with a note saying what was cut " +
-      "(an `include_infos` over a whole file produced 700+ lines). 0: no cap.",
+    "Hard cap on the lines of the text result. 0: no cap.",
     400, minimum = Some(0))
   private val format_arg = PIDE_MCP_Render.Output_Format.arg
   private val wait_seconds_arg = PIDE_MCP_Tool_Arg.int_default(
     "wait_seconds",
-    "If the file is not loaded or not processed yet, wait up to this many seconds for it instead of failing right away. " +
-      "This also waits while the file only waits for imported theories that are still being processed; " +
-      "the result then lists them as `waiting_for`. " +
-      "Use this after the first request for a file to save a round trip. " +
-      "If this call synchronised external edits from disk, it waits up to " + Tool_Get_State.implicit_wait_seconds + " seconds for the file to settle even without wait_seconds. " +
-      "A result that may still change says `provisional` with the reason.",
+    "For a file that is not loaded or processed yet (or waits for its imports, listed as `waiting_for`): wait up to this many " +
+      "seconds instead of returning at once. Not needed after an edit. After syncing disk edits it waits up to " +
+      Tool_Get_State.implicit_wait_seconds + " s anyway.",
     0, minimum = Some(0), maximum = Some(3600))
   private val wait_settled_arg = PIDE_MCP_Tool_Arg.bool_default(
     "wait_settled",
-    "With `wait_seconds`: do not return as soon as the file is being processed, but wait until the file and the imported " +
-      "theories it depends on are completely processed or the file has a failed command (whichever comes first), " +
-      "or until the time is up. Imported theories that are still pending are listed as `waiting_for`. " +
-      "Not needed after an edit: call `get_state` without waiting and treat commands that are still running as a hint to " +
-      "reconsider a slow method. Without `wait_seconds` it waits up to 60 seconds. " +
-      "Commands that failed before do not end the wait.",
+    "Wait (up to `wait_seconds`, default 60) until the file and its imports are completely processed or a command fails. " +
+      "Not needed after an edit.",
     false)
   private val stop_at_error_arg = PIDE_MCP_Tool_Arg.bool_default(
     "stop_at_error",
-    "With `wait_settled`: also stop waiting as soon as one more command of the file fails (to look at the first error " +
-      "of a long reload without waiting for the rest).",
+    "With `wait_settled`: stop at the next failing command.",
     false)
 
   def input_schema: JSON.Object.T = PIDE_MCP_Tool_Schema.input_schema(

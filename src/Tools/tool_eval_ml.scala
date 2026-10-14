@@ -13,17 +13,14 @@ object Tool_Eval_ML {
 
 class Tool_Eval_ML extends PIDE_MCP_Tool("eval_ml") {
   def description: String =
-    "Evaluate ML code in the context at a position of a loaded theory, with all ML structures, functions, and data " +
-      "of the theories imported there (e.g. those defined by `ML_file`) and the theory/proof context of that position " +
-      "(`Context.the_generic_context ()`, `Proof_Context.theory_of`, ... are available). " +
-      "Returns the output of the code: echoed ML values (like `ML` in a theory), and `writeln`/`tracing`/`warning` calls. " +
-      "The file and the theory are not modified: bindings of the code are discarded, so **use this instead of inserting " +
-      "`tracing` calls into an ML file (which reloads it and everything that depends on it).** " +
-      "The code runs with the full rights of the server; side effects outside the theory (files, global ML references) persist. " +
+    "Evaluate ML code at a position of a theory, with the ML structures of its imports and the context there " +
+      "(`Context.the_generic_context ()`); returns echoed values and `writeln`/`tracing` output. Nothing is modified and " +
+      "bindings are discarded: **use it instead of inserting `tracing` into an ML file** (which reloads it and its dependents). " +
+      "Side effects outside the theory (files, global references) persist. " +
       PIDE_MCP_Tool_Schema.implicit_load_file
 
   private val code_arg = PIDE_MCP_Tool_Arg.string(
-    "code", "ML source text to evaluate, e.g. `val t = Syntax.read_term (Context.the_local_context ()) \"x + y\"`.")
+    "code", "ML source text to evaluate.")
 
   def input_schema: JSON.Object.T = PIDE_MCP_Tool_Schema.input_schema(
     Tool_Find.common_args ::: List(code_arg, Tool_Find.format))

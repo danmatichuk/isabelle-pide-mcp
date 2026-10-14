@@ -45,17 +45,14 @@ object Tool_Suggest_Facts {
 
 class Tool_Suggest_Facts extends PIDE_MCP_Tool("suggest_facts") {
   def description: String =
-    "List the facts (theorems) that Sledgehammer's relevance filter (MePo/MaSh) considers most relevant for the goal at a position, " +
-      "most relevant first, without running any prover and without modifying the file. " +
-      "Use it to see which lemmas might close a goal, e.g. before a manual proof or to pass them to `try0`/`simp:`/`using`. " +
-      "`start_line` must be a line inside a proof with an open goal (the goal after that line's command is used). " +
-      "Needs a session based on HOL. " +
+    "The facts Sledgehammer's relevance filter finds most relevant for the goal after `start_line` (inside a proof), " +
+      "without running provers or modifying the file: candidates for `simp add:`/`using`/`try0`. HOL sessions. " +
       PIDE_MCP_Tool_Schema.implicit_load_file
 
   private val max_facts_arg = PIDE_MCP_Tool_Arg.int_default(
     "max_facts", "Maximum number of facts to return.", 20, minimum = Some(1))
   private val statements_arg = PIDE_MCP_Tool_Arg.bool_default(
-    "statements", "Also show the statement of each fact (cut at 300 characters).", true)
+    "statements", "Show each fact's statement.", true)
 
   def input_schema: JSON.Object.T = PIDE_MCP_Tool_Schema.input_schema(
     Tool_Find.common_args ::: List(max_facts_arg, statements_arg, Tool_Find.format))

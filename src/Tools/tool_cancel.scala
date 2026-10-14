@@ -94,13 +94,11 @@ object Tool_Cancel {
 
 class Tool_Cancel extends PIDE_MCP_Tool("cancel") {
   def description: String =
-    "Interrupt the commands of a theory that are still running (e.g. a slow or looping `simp`/`auto`) without unloading the file. " +
-      "Give the lines of the command (or a range); without lines, every running command of the file is interrupted. " +
-      "The commands then show as `canceled`, and the commands after them stay unprocessed until you edit the cancelled one. " +
-      "`get_state` shows how long a command has been running."
+    "Interrupt running commands of a theory (a slow or looping method) without unloading it: those intersecting " +
+      "`start_line`/`end_line`, or all. They show as `canceled`; edit them (cheaper method) to go on."
 
   private val wait_arg = PIDE_MCP_Tool_Arg.int_default(
-    "wait_seconds", "Wait up to this many seconds for the interrupted commands to stop before reporting their status.",
+    "wait_seconds", "Wait this long for the commands to stop.",
     3, minimum = Some(0), maximum = Some(30))
 
   def input_schema: JSON.Object.T = PIDE_MCP_Tool_Schema.input_schema(

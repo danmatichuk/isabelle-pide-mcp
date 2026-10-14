@@ -9,14 +9,12 @@ import isabelle._
 
 class Tool_Check_ML extends PIDE_MCP_Tool("check_ml") {
   def description: String =
-    "Check ML text for SYNTAX errors without running it and without a session or a reload (about 0.2 s): the text is compiled by Poly/ML but the compiled code is never run, " +
-      "so nothing is declared and nothing happens. **Use it on an ML file before the theories that load it are reloaded** (a reload of a big file and everything that imports it takes minutes " +
-      "and then only reports the error), e.g. after a scripted change; `edit` does it automatically for `.ML` files. " +
-      "Finds errors like a trailing comma in a record type or a missing `end`; names and types are NOT checked (the earlier declarations of the text are not run), " +
-      "and antiquotations are not looked at. Give `origin` (a file on disk) or `code`."
+    "Check ML text for SYNTAX errors in about 0.2 s, without a session, reload or running it. Use it after a scripted change " +
+      "of an `.ML` file, before its theories reload (`edit` does it itself). Names, types and antiquotations are not checked. " +
+      "Give `origin` or `code`."
 
   private val origin_arg = PIDE_MCP_Tool_Arg.opt_string(
-    "origin", "Absolute path of the ML file to check (its text on disk is checked).")
+    "origin", "Absolute path of the ML file.")
   private val code_arg = PIDE_MCP_Tool_Arg.opt_string(
     "code", "ML text to check instead of a file.")
 

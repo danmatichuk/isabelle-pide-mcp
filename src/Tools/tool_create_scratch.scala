@@ -10,29 +10,24 @@ import java.io.{File => JFile}
 
 class Tool_Create_Scratch extends PIDE_MCP_Tool("create_scratch") {
   def description: String =
-    "Create a temporary file for experimentation that does not interfere with user accessible files. " +
-      "Use this whenever you think you need to do iterative developments or when you want to find and explore theorems, syntax, concepts, commands, ML code, etc. Write back final results to files accessible to the user. " +
-      "The theory name of a \".thy\" file (to be used in its `theory` header) is returned. " +
-      "Imports are theory names qualified by their session unless they belong to the base session's own top-level namespace, " +
-      "e.g. `Box.Box`, not `Box` (`Bad theory import \"Box\"`): `get_session_state` lists the sessions and their directories. " +
-      "Temporary files are cleaned up when the session stops."
+    "Create a temporary file for experiments (proofs, term shapes, ML) and return its path and `theory` name (use both as " +
+      "they are). Imports are session-qualified (`Box.Box`, not `Box`). Copy final results to the real files; scratch files " +
+      "are deleted when the session stops."
 
   private val name_suffix_arg = PIDE_MCP_Tool_Arg.opt_string(
     "name_suffix",
-    "Label to identify the scratch file (auto-generated if omitted)")
+    "Label for the file name.")
   private val extension_arg = PIDE_MCP_Tool_Arg.opt_string(
     "extension",
-    "File extension, with or without the leading dot (default: \".thy\"). PIDE only loads files with the extension \".thy\" or \".ML\".")
+    "\".thy\" (default) or \".ML\".")
   private val imports_arg = PIDE_MCP_Tool_Arg.strings_default(
     "imports",
-    "For a new \".thy\" file: theories to import (e.g. [\"Main\"]). If given, the file is initialised with a theory skeleton " +
-      "(header, `begin`, `end`) that you then extend; otherwise the file is empty and you have to write the header yourself.",
+    "Theories to import: writes the `theory ... begin ... end` skeleton (otherwise the file is empty).",
     Nil)
 
   private val content_arg = PIDE_MCP_Tool_Arg.opt_string(
     "content",
-    "Complete initial text of the file (including the `theory` header for a \".thy\" file; the theory name must be the returned `theory`, " +
-      "so use `imports` instead if you only need the skeleton). If given, `imports` is ignored.")
+    "Complete initial text instead of `imports` (its header must use the returned `theory` name).")
 
   def input_schema: JSON.Object.T = PIDE_MCP_Tool_Schema.input_schema(
     List(PIDE_MCP_Tool_Schema.running_session_arg, name_suffix_arg, extension_arg, imports_arg, content_arg))

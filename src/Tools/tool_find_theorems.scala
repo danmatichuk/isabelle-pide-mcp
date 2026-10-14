@@ -13,16 +13,13 @@ object Tool_Find {
 
   private val start_line_arg = PIDE_MCP_Tool_Arg.opt_int(
     "start_line",
-    "Line whose end is the position of the query: the theory context there is used (facts, constants, " +
-      "and for the criteria `intro`, `elim`, `dest`, `solves` the goal there). " +
-      "Default: the end of the file (the last command before `end`): the context with all imports and everything " +
-      "the file defines, but no goal. Use a line inside a proof for goal-based criteria.",
+    "Position: the context (and goal) after this line. Default: end of the file (everything it defines, no goal).",
     minimum = Some(1))
   private val prefix_arg = PIDE_MCP_Tool_Arg.opt_string(
     "prefix",
-    "Prefix of the line: the query runs after it. Omit to use the end of the line.")
+    "Run after this prefix of the line instead of its end.")
   private val timeout_arg = PIDE_MCP_Tool_Arg.int_default(
-    "timeout", "Seconds to wait before cancelling the query.", default_timeout_seconds,
+    "timeout", "Seconds before the query is cancelled.", default_timeout_seconds,
     minimum = Some(1))
   private val format_arg = PIDE_MCP_Render.Output_Format.arg
 
@@ -95,9 +92,8 @@ object Tool_Find {
 
 class Tool_Find_Theorems extends PIDE_MCP_Tool("find_theorems") {
   def description: String =
-    "Search theorems by criteria (names, patterns, rules for the goal) in the theories imported at a position of a file. " +
-      "Does not modify the file: **use this instead of grepping the sources or inserting `find_theorems` into a theory.** " +
-      "Criteria are those of Isabelle's `find_theorems`: a pattern in quotes (**use schematic `?x` or `_` for variables, not free names**), " +
+    "Isabelle's `find_theorems` at a position of a file, without modifying it: **use it instead of grepping sources or guessing lemma names.** " +
+      "Criteria: a pattern in quotes (**schematic `?x` or `_` for variables, not free names**), " +
       "`name: <ident>`, `intro`, `elim`, `dest`, `solves`, `simp: \"<pattern>\"`, each negatable with `-`. " +
       "Examples: `\"rev (rev ?xs) = ?xs\"`, `name: rev \"?xs @ _\"`, `-name: foo \"_ + _ = _ + _\"`. " +
       "**Quote names that contain dots: `name: \"List.rev\"`**; to cut generated facts of a datatype, negate them: " +
@@ -136,9 +132,8 @@ class Tools_Find_Theorems extends PIDE_MCP_Tools(new Tool_Find_Theorems)
 
 class Tool_Find_Consts extends PIDE_MCP_Tool("find_consts") {
   def description: String =
-    "Search constants by criteria (type patterns, names) in the theories imported at a position of a file. " +
-      "Does not modify the file: **use this instead of grepping the sources.** " +
-      "Criteria are those of Isabelle's `find_consts`: a type pattern in quotes (e.g. `\"_ list => nat\"`, `\"('a => 'b) => 'a list => 'b list\"`), " +
+    "Isabelle's `find_consts` at a position of a file, without modifying it (instead of grepping sources). " +
+      "Criteria: a type pattern in quotes (e.g. `\"_ list => nat\"`), " +
       "`name: <ident>`, each negatable with `-`. " +
       PIDE_MCP_Tool_Schema.implicit_load_file
 

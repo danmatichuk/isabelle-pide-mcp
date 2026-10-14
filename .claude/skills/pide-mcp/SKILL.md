@@ -2,203 +2,39 @@
 name: pide-mcp
 description: Using the Isabelle proof assistant with the PIDE MCP server. Use this skill whenever working with Isabelle theory files (*.thy) or ML files (*.ML) or when you are dealing with Isabelle in the general sense. Load it also when the PIDE MCP is expected but seems unavailable: it says what to do then (report to the user, no silent fallback to batch builds).
 metadata:
-  version: "1.0"
+  version: "1.1"
 ---
 
-## What I Do
-
-Guidance for Isabelle formalizations and proof development using the PIDE MCP server.
-
-## When To Use Me
-
-Use this skill when working with Isabelle theory files (*.thy) or ML files (*.ML) via the PIDE MCP.
+Workflow for Isabelle theories and ML files through the PIDE MCP server. Parameters are explained in the tool descriptions.
+Read these only when you need them:
+- [sessions.md](sessions.md): starting a session for a project with a ROOT file, libraries and session-qualified imports, when a batch build is better.
+- [ml_files.md](ml_files.md): working on `.ML` files.
 
 ## Before You Start: Check That the MCP Works
 
 **At the start of every Isabelle task, check that the PIDE MCP works, and stop and tell the user if it does not.** Do this before reading, editing, or building anything.
 
-1. **The tools must exist.** The PIDE MCP tools (`mcp__isabelle__*`, e.g. `get_state`, `start_session`) must be in your tool list (they may be deferred: load them with ToolSearch). If they are missing, or the session notice says the Isabelle MCP server failed to connect, the MCP is not working.
-2. **The server must answer.** Call `list_sessions` (cheap). A connection error or any error that is not about your arguments means the MCP is not working.
-3. **A session must be usable.** If no session is running, start one with `start_session` (this can take minutes). If it fails, or `get_state` on the file you are about to work on fails for a reason that is not about Isabelle content, the MCP is not working.
-4. **Load the proof tools up front.** If your tools are deferred (listed by name only), load the ones you will need in the same `ToolSearch` call as the first ones, not when you get stuck: `select:mcp__isabelle__sledgehammer,mcp__isabelle__suggest_facts,mcp__isabelle__find_theorems,mcp__isabelle__find_consts,mcp__isabelle__create_scratch,mcp__isabelle__get_session_state`. Tools you never loaded are tools you will not think of: a failing proof is the moment to use `try0` and `sledgehammer [timeout = 10]`, not to guess another `metis`/`auto` variant.
-5. **Tool schemas can be outdated after a server restart.** If the server was rebuilt or restarted (it may restart itself on the next call after its sources changed), the tool schemas you loaded earlier may still be the old ones: a parameter or limit missing from your copy (e.g. `wait_seconds` above 600) can exist on the server. Try the documented parameter anyway, or re-load the tool schema with `ToolSearch`.
+1. **The tools must exist** (`get_state`, `start_session`, ...). If they are deferred, load them with ToolSearch, **together with the proof tools** you will need: `select:mcp__isabelle__sledgehammer,mcp__isabelle__suggest_facts,mcp__isabelle__find_theorems,mcp__isabelle__find_consts,mcp__isabelle__create_scratch,mcp__isabelle__cancel,mcp__isabelle__get_session_state`. Tools you never loaded are tools you will not think of.
+2. **The server must answer:** call `list_sessions`.
+3. **A session must be usable:** if none runs, `start_session` (may take minutes). Some sessions may already run; each has its own state, and most tools take its id (`session`, optional if only one runs).
 
-**If the MCP is not working: stop, do not work around it.** Tell the user:
-- what failed (tool missing, server not connected, session start failed, ...) and the **exact error text**,
-- what you checked (which calls),
-- and ask how to proceed.
+**If one of these fails: stop, do not work around it.** Tell the user what failed with the **exact error text** and what you checked, and ask how to proceed. Do not silently fall back to `isabelle build`, blind edits or `grep`; a batch fallback needs the user's explicit agreement. The same holds mid-task when the server or session dies. Errors in the Isabelle content (failed proofs, type errors) are normal, not MCP failures. After a server restart, tool schemas you loaded may be outdated: try a documented parameter anyway, or reload the schema.
 
-**Do not silently fall back** to `isabelle build`, editing files blindly, `grep`, or other batch workflows, and do not continue as if nothing happened. A batch fallback is only acceptable if the user explicitly agrees to it after you reported the failure.
+## Edit, Then `get_state`
 
-The same applies in the middle of a task: if a tool call fails because the server or session died (connection errors, "session is not ready", ...), report it instead of switching workflows. Errors in the Isabelle content (failed proofs, type errors) are normal and are **not** MCP failures: handle those as usual.
+- **Add a few definitions or lemmas at a time,** not hundreds of lines: errors and loops are then easy to locate.
+- **Edit with `edit`** (it returns as soon as the text is written) or with scripts (`sed`, Python) for changes in several places; `get_state` picks up disk edits. Edit one file one call after the other.
+- **After every edit, call `get_state` right away, without `wait_seconds`,** on a narrow `start_line`/`end_line` around what you changed; check the file-wide counts too, since a local change can break later commands.
+- **A clean theory has 0 failed, 0 errors and 0 `bad`. `sorry` is reported as `bad`, not as an error.**
+- **`still_running_possibly_nonterminating` is a signal, not something to wait for.** Methods usually finish in under 5 s. If one is still running after a few seconds (a big `simp`/`auto`, a VCG), replace it by a cheaper or more targeted one (fewer rules, `simp only:`, an explicit rule, a split goal). `cancel` (origin + line) interrupts it without unloading the file; `edit` with `cancel_after_seconds: N` interrupts edited commands that run longer than N s. After a cancel, edit that command: commands after it are processed again only then. Past ~30 s, assume a loop.
+- **Fence off the rest of the theory while you work on a proof:** put `end` lines right after it, one per open `context`/`locale … begin` block plus one for the theory (spare ones do no harm). The commands after the fence then fail at once with `missing theory context` or `Bad context` errors, which are expected and cost no time: look only at the problems before the fence, and remove it when you move on.
+- **After a refactor, read `first_problem` first:** later failures are often its consequences. Use `sorry` to set aside a part that blocks the rest.
+- **Before a call that may take long** (`start_session`, `get_state` with `wait_seconds` ≥ 10), say in one line what you check and the longest wait, and afterwards what came back: the user only sees a spinner.
+- If the prover seems stuck, `get_session_state` shows the running commands of all theories. Only as a last resort `unload` the theory or restart the session.
 
-## Quick Reference
+## Finding Facts and Experimenting
 
-PIDE MCP comes with a customizable set of tools.
-This SKILL file describes some basic tools that might be available.
-Also load other SKILL files that describe tools offered by PIDE MCP.
-Important rules (further elaborated in the sections below):
-
-- PIDE MCP can manage several Isabelle PIDE sessions. **Some sessions might have already been started.**
-- **Most tools take the id of a running session as input. Use `list_sessions` to get the ids and status of all sessions.**
-- **After every edit, call `get_state`** to see status, errors, warnings.
-- **To see which lemmas are relevant for a goal, use `suggest_facts`** (Sledgehammer's relevance filter without running provers; HOL-based sessions).
-- **A goal shown as `A &&& B` is several subgoals in one: apply any method, even the no-op `apply -`, to split it.** `&&&` is the meta-level conjunction; it appears for `lemma "A &&& B"` and for a lemma with several conclusions (`shows A and B`). Observed: `lemma "x = x &&& y = y"` shows `1. x = x &&& y = y`, and after `apply -` it shows `2 subgoals: 1. x = x 2. y = y`; A method splits the goal first and then acts on subgoal 1 (`apply (rule refl)` on `x = x &&& y = y` succeeds and leaves `y = y`), so `rule conjI` / `rule conjunctionI` fail there, and a `Failed to apply proof method` error shows the goal from BEFORE the method (the unsplit chain): that failure says nothing about splitting. So do not reach for those rules: `apply -`, then solve each subgoal, or use `simp_all` / `auto` on all of them. This is for `&&&` goals only: the goal of `instance` (`OFCLASS(nat, two_ax_class)`) or `interpretation` (`two (\<lambda>x. x)`) is one predicate that `apply -` leaves alone; split it with `standard` (instance) or `unfold_locales` (interpretation).
-- **To test ML against the live theory state, use `eval_ml`** (ML code run at a position of a loaded theory, with the ML structures of its imports; the file is not modified). Do not insert `tracing` calls into an ML file: every probe reloads the file and all dependent theories.
-- **Scripted changes (Bash, `sed`, Python; several hunks or several files at once) are fine:** the next `get_state` synchronises them, so you do not need `edit` for those. Use `edit` for a single change: it returns as soon as the text is written.
-- **After an edit, call `get_state` right away, without `wait_seconds`.** Commands that are still running are a signal, not something to wait for: if a method in the edited part is still running after a few seconds (a big `simp`/`auto`, a VCG), consider replacing it by a cheaper or more targeted one (fewer rules, `simp only: ...`, an explicit rule, a split goal) instead of waiting. `cancel` (origin + line) interrupts it without unloading the file; `edit` with `cancel_after_seconds: N` interrupts edited commands that run longer than N s. Call `get_state` again to see the rest.
-- **Issue edits to one file one after the other**, each followed by `get_state`. (`edit` with `check: true` blocks until the file is processed, up to 30 s, so a slow method blocks the call: do not use it by default.)
-- **Say what you are waiting for before a call that may take more than a few seconds, and what came back after it.** The user only sees `Isabelle [get_state]` and a spinner, which looks like a stuck agent. Before a long call (`get_state` with `wait_seconds` of 10 or more, `start_session`) write one line: what you check and the longest wait ("Checking Box_Tests, up to 10 min"); afterwards one line with the result. Your text between tool calls is visible to the user in the editor.
-- **To look up theorems or constants, use the `find_theorems` / `find_consts` tools** (they do not modify the file) instead of grepping the sources of imported theories (search by name, `name: rev`, or by pattern, `"rev (rev ?xs) = ?xs"`).
-- **Restrict by `start_line` / `end_line`** when querying to avoid analysing data for hundreds of finished commands in large theories.
-- **`sorry` is reported as `bad`, not as an `error`.** A clean theory has 0 bad commands AND 0 errors AND 0 failures.
-- **If `> 0` commands are running for more than ~30s, suspect a loop** - restructure rather than wait.
-- **Use `get_session_state` whenever you think the process is stuck** - it shows progress of theories and lists currently running commands and resource statistics.
-- **Use `get_session_state` for a global overview and `get_state` for theory-local information.**
-- **The PIDE perspective** is set by some tools and marks the commands for which print functions are run, which return extra output e.g. automatic `quickcheck` and `solve_direct` information.
-- **`create_scratch`**: use for exploration and alternatives. (Typically) use the same imports on scratch theories as the ones you use for the development that you are creating a scratch theory for.
-
-## Interaction with Isabelle via PIDE MCP
-
-### Session Management
-
-- **Each (PIDE) session has a unique id and its own base session, directories, options, and independent state.** A file loaded in one is invisible to the others.
-- Most tools take a running session's id as input, which may be omitted when exactly one session runs.
-- **`start_session` is synchronous and may take minutes** as it builds the base session if missing.
-    **Use it only when required**, e.g. to restart an unresponsive session, after a `ROOT` file change, or to move to a different base session.
-- **Only use `stop_session` when required**, e.g. when you have to restart a session or urgently need to free resources.
-- `stop_session` keeps files on disk, unless some tool decides to cleanup (e.g. `create_scratch` deletes the session's scratch files).
-- **`unload` unloads a file and its dependents from the session. Only use it when required**, e.g. when you are 100% certain a theory got unresponsive or you urgently need to free resources.
-
-### State Synchronization
-- **All changes are immediately checked** by PIDE after edits.
-- **You may edit with whatever is convenient:** the `edit` tool, or scripts (`sed`, Python,...) for mechanical or multi-location rewrites. Write each file in one go, not in several partial steps.
-- **`get_state`, `get_session_state`, and `find_entities` automatically pick up changes made on disk** to all loaded files (also by a human who saves their editor), and send only the changed lines to PIDE. After a scripted edit, just call `get_state`; no `read` is needed. The result then contains `external edits synced: <file> (N of M lines in K spans; lines 12, 30-31, 62 (removed))` giving the changed lines in the new text, capped at 10 spans (`external_edits_synced` in `format: json`). The note also names a `full diff` file: it is for the human reviewer, so do not read it (it would only use up your context) unless asked. When you tell the user about a scripted edit, give them that file as a markdown link, e.g. `[sync diff](/abs/path/sync_x.diff)`, because tool output is not clickable for them. (If the note instead says `full diff shown to the user`, the project's PostToolUse hook already showed them the path: nothing to do.) The ranges only show where the text changed: a local edit can break commands anywhere after it (and in dependent theories), so check the whole file's state, not just those lines.
-- After a big rewrite, many commands are still reprocessing when `get_state` answers: call it again before trusting the counts, and look at commands that keep running.
-- **Use `read` to re-synchronise** only for files that are not loaded yet, or if the state still does not match the disk (changes are detected by modification time and size, so a same-size edit within the same timestamp tick can be missed). Base session theories are static and never synchronised.
-- Reading unloaded theories with other tools (e.g. grepping the AFP) is fine.
-- **Avoid absolute file path imports for theories. Use session-qualified theory names for sessions available to you.** See `get_session_state` on how to find session qualifiers.
-- **`edit` synchronises its file from disk before matching `old_text`.** If `old_text` is rejected as not found, the text really differs from what you expect (e.g. a human edited it): `read` the range again.
-
-### After Every Edit
-1. **Check for errors/unfinished/successful commands after edits (also scripted ones) with `get_state`**, which synchronises disk edits first.
-2. **`sorry`s are included as `bad` commands. `errors` counts actual failures. A "clean" state requires both to be 0.**
-
-### Time Management
-- **Avoid adding large amounts of new material at once, as it makes it hard to identify the source of errors and nontermination.**
-- **Proof methods typically terminate in less than 5 seconds.**
-- If commands take longer, be suspicious! Only if you are very confident that a proof legitimately needs more time wait a bit longer. Short waits typically let you move faster!
-- **If `get_state` shows `> 0` running commands for more than ~30 seconds, suspect non-termination** (a loop or overly expensive computation). Restructure rather than wait.
-- **Use `get_session_state` to show the progress and currently running commands across all theories.**
-
-### Scratch Theories
-- **Use `create_scratch` to test large changes in a scratch theory before radically changing an existing theory.**
-- **Scratch theories persist for the session**. They are deleted on session stop. You may further change and explore them once created in the course of the session.
-- Use the scratch theories to try proofs and search tools without polluting your main development. Exception: if it is just a brief exploration (e.g. calling `sledgehammer` or `find_theorems` on the currently open goals), just do it in the same theory.
-- **`create_scratch` returns the `path` and the `theory` name.** Use the returned path as `origin` as it is: the file name is fixed (`tmp_pide_mcp_scratch_<suffix>.thy`), so do not invent your own file name. The theory header must use the returned `theory` name. The extension defaults to `.thy` (pass `.ML` for ML files, which only load through a theory).
-- For scratch theories, pass the imports matching your needs with the `imports` argument (e.g. `["Box.Seq"]`), which writes the `theory … imports … begin … end` skeleton for you; then add content with `edit`. Typically, use the same imports as the development that you are creating a scratch theory for. Without `imports`, the file is empty and you write the header yourself.
-
-**Incremental workflow** (for developing complex proofs):
-```
-1. create_scratch → scratch theory_path
-
-2. edit → extend the scratch theory (insert new content)
-
-3. get_state → check the new status in the scratch theory
-
-4. happy with the result → write it back to the original file
-```
-
-This allows you to test proof strategies and alternative developments without changing the original file.
-Final results can be written back to the original file.
-
-### Querying (Proof) Context
-- **`get_state` returns structured information at any command position, including status (check it after edits), subgoals, prover messages (errors, warnings, writelns, .etc), type information for terms,...**
-- **`get_state` accepts flags to opt into some of the data**, like `include_types` (for Isabelle and ML), `include_facts` (theorems used in range), etc.
-- **Choose the `get_state` `detail` level.** `summary` returns counts and the first failing command (a few hundred tokens). `locations` (the default unless `commands_limit` is positive) adds one compact entry per problematic command: line range, problem kinds, first message line, no source. `full` adds sources and all messages. A positive `commands_limit` implies `full`. `commands_limit` only limits the plain commands list: `commands_limit: 0` is fine for "what failed?", it still lists the problems (use `detail: summary` for counts only).
-- **Each problematic command is listed once** in `problems` with its `kinds` (`failed`, `bad`, `errors`, `warnings`, ...). `problems_limit` (default 10) caps the list but the counts stay complete. `source_max_lines` (default 5) cuts long sources.
-- **After a refactor, many commands fail as consequences of one early error.** Look at `first_problem` first: it is the first failing command in file order and usually the cause. `get_session_state` with `include_failures` gives the same per theory plus the lines of failing commands, so you can locate errors across theories without a large `get_state`.
-- `include_infos` and `include_types` / `include_facts` can enlarge `full` output considerably; use them on narrow line ranges only.
-- All tools return compact readable text. `get_state`, `get_session_state`, and `find_entities` accept `format: json` for structured JSON instead.
-- **If a result exceeds the client's output limit,** Claude Code saves it to a file and tells you so. For the default text format, `grep` that file or `Read` it in line chunks. A `jq` suggestion only applies to `format: json`. Prefer a narrower line range, `detail: locations` or `summary`, or a smaller `problems_limit` over reading a huge result.
-- Use `wait_seconds` on `get_state` for a file that is not loaded yet, instead of retrying. If a file shows all commands `unprocessed` and a `waiting for imported theories still being processed: …` line (`waiting_for` in JSON), it is waiting for those upstream theories; `wait_seconds` blocks until the file itself is being processed, and `get_session_state` shows the upstream progress.
-- A message in the `summary`/`locations` views ending in `(+N more lines, see detail: full)` is cut off: use `detail: full` on that line range to read all of it (the goal state and context are usually in the later lines).
-- With `include_infos`, pass `include_ml_echo: false` to drop the echo of top-level ML declarations (`val x = …`, `structure …`) and keep explicit `writeln` output.
-- `include_infos` output is capped per message (`info_max_lines`, default 30): ML top-level bindings echo their values. Print only the fields you need, or wrap the code in `let` so that nothing is echoed.
-- **Restrict by `start_line` / `end_line`** when you only care about a specific lemma or error - it is less verbose than scanning the whole file. But don't forget that local changes may have global effects.
-- **`find_entities` lets you explore defined entities (theorems, definitions, methods, ML terms, etc.)**.
-Moreover, you can use Isar commands if necessary, for example:
-- **`print_facts` - print all facts of the current context (named assumptions, case facts, intermediate results, locale assumptions, etc.)**
-- `find_theorems`
-- `find_consts`
-
-### ML Files
-- **Work on `*.ML` files through the MCP like on theories**: `read`, `edit`, `get_state`, and `find_entities` take the file path as `origin`. External edits (scripts, `sed`) are synchronised as for theories.
-- **An ML file is only processed as part of the theory that loads it** (`ML_file "Foo.ML"`). Load that theory first (`read` it); until then `get_state` on the ML file only queues it. "Not loaded by any theory" means no loaded theory loads the file.
-- **The whole ML file is one command** (the `ML_file` command). `get_state` therefore shows one entry for it, whose first message names the failing line (`ML error (line N of …)`). Use `detail: full` to see the complete message. Dependents in the loading theory are rechecked automatically after every change.
-- **Large ML files are reprocessed completely after each edit.** For exploration, test the code in a scratch theory with the same imports using `ML \<open>…\<close>` blocks: each block is its own command, so you get per-block status, types (`include_types`), and output in seconds. Move the finished code into the `.ML` file afterwards.
-- **Check an `.ML` file's syntax before it is reloaded: `check_ml`** (`origin` = file, or `code`; no session needed, about 0.2 s, nothing is run). Call it after any scripted change to an `.ML` file (`sed`, a script, a file written outside `edit`) and before reloading its theory: a reload of a big file and its dependents takes minutes and then only reports the error. `edit` runs it itself on `.ML` files and refuses to write on a syntax error (`check_ml: false` writes anyway). It checks syntax only, not names or types. **"No syntax errors found" is not "checked" for lines at antiquotations or with control characters**: the result gives how many lines were NOT checked, and an error on such a line is not reported, so still use `get_state` after the reload.
-- **Do not fall back to `isabelle build` just because the file is ML.** The MCP rechecks incrementally, shows ML errors with their lines, and keeps the session loaded; a batch build restarts from the session image and shows less.
-
-### When a batch build is the better tool
-- **A batch build is never a silent fallback for a broken MCP** (see "Before You Start"): if the MCP does not work, tell the user.
-- For a mechanical change across many lines where few errors are expected, or for sessions the PIDE session is not based on (e.g. a test session built on the session you are editing), `isabelle build` and grepping its `***` lines is simpler and cheap.
-- For proof debugging, goal states, `find_theorems`, and checking downstream theories, the MCP is better: it rechecks incrementally in seconds.
-- To see whether later theories are healthy while an early theory is broken, put `sorry` in (or comment out) the broken part of the early theory.
-
-### Starting a session for a project with a ROOT file
-`start_session` without arguments gives a plain `HOL` session. For a project, pass `dirs` (the directories containing the project's `ROOT` files) and choose one of two ways to say which theories you are going to edit:
-
-- **`logic` = the session your edited theories build on** (their parent session, not the session they belong to). The base image is built from that session; everything else is loaded dynamically. Example: `logic: "MyParent"`, `dirs: ["/path/to/project"]`.
-- **`logic` = the session your edited theories belong to, with `session_requirements: true`.** This builds the base image from the *requirements* of that session, i.e. the theories it imports from other sessions, on top of an ancestor session. The session's own theories are then not part of the image and are loaded dynamically, so you can edit them. The ancestor defaults to the parent session of `logic`; `session_ancestor` overrides it (it must be an ancestor of `logic`, not a session that imports `logic`). Example: `logic: "MyProject"`, `session_requirements: true`, `dirs: ["/path/to/project"]`.
-
-Use `session_requirements` when you do not want to work out the parent session yourself, or when the session imports further sessions beside its parent: the image then contains them too and they do not need to be loaded dynamically. `no_build: true` checks whether the image already exists without building it.
-
-### Importing existing library, facts, and definitions
-- **Use `get_session_state` to get all available session directories, often containing useful library material.**
-- Import theories from these sessions using the right **session-qualified import**.
-- **A theory file in a session directory can be imported by its session-qualified name even if the session's `ROOT` file does not list it** (checked: `S6.C` with `theories A` only in the `ROOT`). `ROOT` only decides what a batch build processes.
-- **To get session qualifiers, grep the `ROOT` files in the session directories.**
-
-### Common Pitfalls
-
-#### Large Changes
-- ❌ **Don't:** Add hundreds of lines of new definitions and proofs in one edit
-- ✅ **Do:** Add incrementally - a few definitions at a time, check after each
-    - Easier to identify source of errors
-    - Faster feedback on timeouts
-    - Better isolation of problematic proofs
-
-#### Status Checking
-- ❌ **Don't:** Make multiple edits without checking status
-    ```
-    edit  (* Add lemma 1 *)
-    edit  (* Add lemma 2 *)
-    edit  (* Add lemma 3 - which one has the error? *)
-    ```
-- ✅ **Do:** Check `get_state` after each significant edit
-    ```
-    edit
-    get_state  (* Verify status: ok *)
-    edit  (* Continue only after verification *)
-    ```
-
-#### Scratch Theory Usage
-- ❌ **Don't:** Try to import scratch theories from your main development
-- ✅ **Do:** Use scratch theories for experimentation, then copy successful results back to main theory
-    ```
-    1. create_scratch to test approach
-    2. Verify it works in scratch theory
-    3. Copy successful proof back to main theory with edit
-    ```
-
-### Error Recovery
-
-If you encounter errors or non-termination:
-1. Check the exact error.
-2. Isolate the problem: use `sorry` to skip problematic parts temporarily.
-3. Make incremental fixes: make small changes and check after each.
-4. Use `create_scratch` for experimentation and alternatives.
-5. Increase wait for termination if needed, but prefer refactoring over long waits!
-6. If you think the process is unresponsive, use `get_session_state` to find information. If all other means fail, unload the theory and, if that also fails, restart the session.
-
+- **Use `find_theorems` / `find_consts` before guessing lemma names** (by name, `name: rev`, or by pattern, `"rev (rev ?xs) = ?xs"`); they do not modify the file. `suggest_facts` lists the lemmas Sledgehammer considers relevant for a goal. In a proof, `print_facts` shows the local facts.
+- **A goal shown as `A &&& B` is several subgoals in one: apply any method, even the no-op `apply -`, to split it,** then solve each or use `simp_all`/`auto`. A method splits first and then acts on subgoal 1, so `rule conjI`/`conjunctionI` fail there, and a `Failed to apply proof method` error shows the unsplit goal from before the method. Goals of `instance` (`OFCLASS(...)`) or `interpretation` are one predicate: split them with `standard` / `unfold_locales`.
+- **Experiment in a scratch theory (`create_scratch`)** with the same imports as your development: use the returned path and `theory` name as they are, never import a scratch theory from the development, and copy what works back. A quick `sledgehammer` or `find_theorems` on the current goal can stay in the file.
+- **Test ML against the live theory state with `eval_ml`,** not with `tracing` calls in an ML file (each probe reloads it and its dependents).
