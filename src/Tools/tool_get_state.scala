@@ -11,7 +11,9 @@ object Tool_Get_State {
   val repeats = Synchronized(Map.empty[String, (Int, Int)])
   val repeat_note_after: Int = 3
   // wait after external edits were synced, if no wait_seconds is given
-  val implicit_wait_seconds: Int = 30
+  val implicit_wait_seconds: Int = 5
+  // wait after a theory with a failed header was loaded again, if no wait_seconds is given
+  val reload_wait_seconds: Int = 30
   // wait_settled without wait_seconds
   val settled_default_seconds: Int = 60
 }
@@ -91,7 +93,7 @@ class Tool_Get_State extends PIDE_MCP_Tool("get_state") {
       "This also waits while the file only waits for imported theories that are still being processed; " +
       "the result then lists them as `waiting_for`. " +
       "Use this after the first request for a file to save a round trip. " +
-      "If this call synchronised external edits from disk, it waits up to 30 seconds for the file to settle even without wait_seconds. " +
+      "If this call synchronised external edits from disk, it waits up to " + Tool_Get_State.implicit_wait_seconds + " seconds for the file to settle even without wait_seconds. " +
       "A result that may still change says `provisional` with the reason.",
     0, minimum = Some(0), maximum = Some(3600))
   private val wait_settled_arg = PIDE_MCP_Tool_Arg.bool_default(
@@ -134,7 +136,7 @@ class Tool_Get_State extends PIDE_MCP_Tool("get_state") {
       val implicit_wait = synced.nonEmpty && wait_seconds_arg.get(args) == 0
       val wait_seconds =
         if (wait_seconds_arg.get(args) > 0) wait_seconds_arg.get(args)
-        else if (reloaded) Tool_Get_State.implicit_wait_seconds  // the file is being loaded again
+        else if (reloaded) Tool_Get_State.reload_wait_seconds  // the file is being loaded again
         else if (settled_requested) Tool_Get_State.settled_default_seconds
         else if (implicit_wait) Tool_Get_State.implicit_wait_seconds
         else 0
