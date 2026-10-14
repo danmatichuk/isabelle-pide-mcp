@@ -1,12 +1,10 @@
 # Notes for agents working in this repository
 
-## Skills: sync the global copies after every skill commit
+## Skills: do not sync the global copies
 
 Agents started outside this repository load the global skills in `~/.claude/skills`, which are plain copies (no symbolic links) of `.claude/skills`.
-After **every commit that changes the skills** (`.claude/skills`, `.agents/skills`, `.opencode/skills`), run `dev/sync_skills.sh` yourself right after
-the commit (it backs up the old global copies under `~/.claude/skills/.backup-<time>/`; `--dry-run` shows what would change), and say in the last
-line of your reply that the sync was run. The user authorised exactly this script for this purpose; do not use it for anything else and do not touch the
-global skills in any other way.
+Do not run `dev/sync_skills.sh` and do not touch the global skills in any other way, also not after a commit that changes the skills: experiment
+harnesses take the skills from each commit, and the global copies stay as the user set them. Run the script only when the user asks for it.
 
 ## Hooks
 
