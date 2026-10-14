@@ -292,12 +292,14 @@ object PIDE_MCP_Render {
             s"; reprocesses ${scalar(r.getOrElse("theories", 0))} theories, ${scalar(r.getOrElse("commands", 0))} commands" }.getOrElse("")
       }
       val ml_errors = list(sync.getOrElse("files", Nil)).map(obj).flatMap(_.get("ml_syntax_error")).map(scalar)
-      List("external edits synced: " + files.mkString(", ") +
+      // disk changes held by the cost guard: not in the prover
+      val held = list(sync.getOrElse("held", Nil)).map(obj).map(h => "*** " + scalar(h.getOrElse("reason", "?")) + " ***")
+      Option.when(files.nonEmpty)("external edits synced: " + files.mkString(", ") +
         ml_errors.map("\n*** " + _ + " ***").mkString +
         sync.get("diff_file").fold("") { f =>
           val path = scalar(f)
           s"\nfull diff: $path"  // for the human (the PostToolUse hook shows it); nothing for the agent to do
-        })
+        }).toList ::: held
     }
     val waiting = list(state.getOrElse("waiting_for", Nil)).map(obj).map(w =>
       s"${scalar(w.getOrElse("origin", "?"))} (${scalar(w.getOrElse("percentage_commands_processed", 0))}%)")

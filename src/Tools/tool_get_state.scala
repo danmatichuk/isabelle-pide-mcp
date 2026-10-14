@@ -77,6 +77,9 @@ class Tool_Get_State extends PIDE_MCP_Tool("get_state") {
     "Hard cap on the lines of the text result. 0: no cap.",
     400, minimum = Some(0))
   private val format_arg = PIDE_MCP_Render.Output_Format.arg
+  private val confirm_cost_arg = PIDE_MCP_Tool_Arg.bool_default(
+    "confirm_cost",
+    "Apply disk changes that the cost guard held (they make Isabelle run most of a theory again).", false)
   private val wait_seconds_arg = PIDE_MCP_Tool_Arg.int_default(
     "wait_seconds",
     "For a file that is not loaded or processed yet (or waits for its imports, listed as `waiting_for`): wait up to this many " +
@@ -98,7 +101,7 @@ class Tool_Get_State extends PIDE_MCP_Tool("get_state") {
       PIDE_MCP_Tool_Schema.opt_start_line_arg, PIDE_MCP_Tool_Schema.opt_end_line_arg,
       include_types_arg, include_facts_arg, include_infos_arg, include_full_markup_arg,
       commands_limit_arg, detail_arg, problems_limit_arg, source_max_lines_arg, goal_max_lines_arg, info_max_lines_arg, include_ml_echo_arg,
-      wait_seconds_arg, wait_settled_arg, stop_at_error_arg, max_output_lines_arg, format_arg))
+      wait_seconds_arg, wait_settled_arg, stop_at_error_arg, max_output_lines_arg, confirm_cost_arg, format_arg))
 
   override def annotations: Option[JSON.Object.T] = Some(JSON_Object("readOnlyHint" -> true))
 
@@ -110,12 +113,12 @@ class Tool_Get_State extends PIDE_MCP_Tool("get_state") {
     PIDE_MCP_Tool_Result.result {
       val session = PIDE_MCP_Tool_Util.running_session_param(sessions, args)
       val node_name = PIDE_MCP_Tool_Util.origin_param(session, args)
-      val synced = PIDE_MCP_Tool_Util.sync_disk_edits(session, progress)
+      val synced = PIDE_MCP_Tool_Util.sync_disk_edits(session, progress, confirm = confirm_cost_arg.get(args))
       // after a disk edit was synced, the result of the old text is gone and the new text is not processed
       // yet: wait a bit for it by default
       val reloaded = PIDE_MCP_Tool_Util.reload_failed_header(session, node_name, progress)
       val settled_requested = wait_settled_arg.get(args)
-      val implicit_wait = synced.nonEmpty && wait_seconds_arg.get(args) == 0
+      val implicit_wait = synced.exists(_.contains("files")) && wait_seconds_arg.get(args) == 0
       val wait_seconds =
         if (wait_seconds_arg.get(args) > 0) wait_seconds_arg.get(args)
         else if (reloaded) Tool_Get_State.reload_wait_seconds  // the file is being loaded again

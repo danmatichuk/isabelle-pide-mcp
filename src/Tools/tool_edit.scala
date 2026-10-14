@@ -119,8 +119,9 @@ object Tool_Edit {
     old_text: String,
     edit_all: Boolean,
     progress: Progress,
-    ml_check: Boolean = false
-  ): (String, Int, Option[(Int, Int)], Option[String], Option[String]) = {
+    ml_check: Boolean = false,
+    guard: Int => Option[String] = _ => None  // the first changed line: Some(reason) holds the edit (cost guard)
+  ): (String, Int, Option[(Int, Int)], Option[String], Option[String], Option[String]) = {
     if (session.is_base_session_theory(node_name))
       error(s"Cannot edit base session theory ${quote(session.origin(node_name))}")
     PIDE_MCP_Tool_Util.require_ordered_lines(opt_start_line, opt_end_line)
@@ -169,7 +170,11 @@ object Tool_Edit {
       val ml_blocked = ml_result.filter(_._1.errors.nonEmpty).map(_._2)
       // a written file that was only partly judged says so (a clean pre-check must not read as "checked")
       val ml_note = ml_result.filter(r => r._1.errors.isEmpty && r._1.unjudged > 0).map(r => PIDE_MCP_ML_Check.unjudged_note(r._1.unjudged))
-      if (ml_blocked.nonEmpty) (current_text, 0, None, ml_blocked, None)
+      lazy val first_line =
+        doc.position(edit_replacements(mode, offsets, actual_old_text.length, new_text).map(_._1).min).line1
+      val cost_blocked = if (changed && ml_blocked.isEmpty) guard(first_line) else None
+      if (ml_blocked.nonEmpty) (current_text, 0, None, ml_blocked, None, None)
+      else if (cost_blocked.nonEmpty) (current_text, 0, None, None, None, cost_blocked)
       else {
       new_raw.foreach(session.write_file_text(node_name.path, _))
       val text = session.read_update(
@@ -179,7 +184,8 @@ object Tool_Edit {
       session.await_stable_snapshot(progress)
       session.resolve_dependencies(List(node_name), progress)
       (text, if (changed) offsets.length else 0,
-        Option.when(visible_lines.nonEmpty)((visible_lines.map(_._1).min, visible_lines.flatMap(_._2).max)), None, ml_note)
+        Option.when(visible_lines.nonEmpty)((visible_lines.map(_._1).min, visible_lines.flatMap(_._2).max)), None, ml_note,
+        None)
       }
     }
   }
@@ -216,6 +222,9 @@ class Tool_Edit extends PIDE_MCP_Tool("edit") {
     "cancel_after_seconds",
     "Time limit: interrupt (as `cancel`) any edited command still running after this many seconds. 0: none.",
     0, minimum = Some(0), maximum = Some(3600))
+  private val confirm_cost_arg = PIDE_MCP_Tool_Arg.bool_default(
+    "confirm_cost",
+    "Apply the edit although the cost guard held it (it makes Isabelle run most of the theory again).", false)
   private val check_arg = PIDE_MCP_Tool_Arg.bool_default(
     "check",
     "Opt-in: wait for processing and return the file's status (blocks while slow commands run; prefer `get_state`).",
@@ -225,7 +234,7 @@ class Tool_Edit extends PIDE_MCP_Tool("edit") {
     List(PIDE_MCP_Tool_Schema.running_session_arg, PIDE_MCP_Tool_Schema.origin_arg, mode_arg,
       text_arg, PIDE_MCP_Tool_Schema.opt_start_line_arg,
       PIDE_MCP_Tool_Schema.opt_end_line_arg, old_text_arg, edit_all_arg, check_arg, check_wait_arg, check_ml_arg,
-      cancel_after_arg))
+      cancel_after_arg, confirm_cost_arg))
 
   override def annotations: Option[JSON.Object.T] = Some(JSON_Object("destructiveHint" -> true))
 
@@ -243,14 +252,25 @@ class Tool_Edit extends PIDE_MCP_Tool("edit") {
       val edit_all = edit_all_arg.get(args)
       val opt_start_line = PIDE_MCP_Tool_Schema.opt_start_line_arg.get(args)
       val opt_end_line = PIDE_MCP_Tool_Schema.opt_end_line_arg.get(args)
+      for (reason <- session.held_disk_change(node_name))
+        error("The file has a change on disk that the prover does not have yet (the cost guard held it): call `get_state` " +
+          "with `confirm_cost: true` to apply it, or undo it on disk; then edit. " + reason)
       val reloads = PIDE_MCP_Tool_Util.reload_estimate(session, node_name)
       val snapshot_before = Exn.result(session.snapshot()) match { case Exn.Res(s) => Some(s); case _ => None }
-      val (_, count, edited_range, ml_blocked, ml_note) = Tool_Edit.read_update_edit(
+      // an `end` fence (only `end` lines inserted) is never held: it makes the rest of the theory cheap
+      val fence = text.split("\n").forall(l => l.trim.isEmpty || l.trim == "end") &&
+        (mode != Tool_Edit.Edit_Mode.replace || old_text.trim.isEmpty)
+      def guard(line: Int): Option[String] =
+        if (confirm_cost_arg.get(args) || fence) None
+        else snapshot_before.flatMap(before => PIDE_MCP_Tool_Util.cost_guard(session, before, node_name, line,
+          s"this edit (from line $line)", "repeat the edit with `confirm_cost: true`. The file was NOT written"))
+      val (_, count, edited_range, ml_blocked, ml_note, cost_blocked) = Tool_Edit.read_update_edit(
         session, mode, node_name, text, opt_start_line, opt_end_line, old_text,
-        edit_all = edit_all, progress = progress, ml_check = check_ml_arg.get(args))
+        edit_all = edit_all, progress = progress, ml_check = check_ml_arg.get(args), guard = guard)
       val (status, description) =
         if (ml_blocked.nonEmpty) ("not written", "the new text has an ML syntax error: the file was NOT written and nothing reloads. " +
           ml_blocked.get + "\nFix the text and edit again (check_ml: false writes it anyway).")
+        else if (cost_blocked.nonEmpty) ("not written", cost_blocked.get)
         else if (count > 0) ("written", s"Edited $count occurrence(s)" + ml_note.fold("")(n => s". ML syntax pre-check found no error, but $n"))
         else ("unchanged", "Unchanged - did you replace the text by itself?")
       val cancel_after = cancel_after_arg.get(args)

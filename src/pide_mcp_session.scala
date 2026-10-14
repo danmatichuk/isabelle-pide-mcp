@@ -421,10 +421,17 @@ class PIDE_MCP_Session private(
     diff: String
   )
 
-  sealed case class Sync_Result(changes: List[Sync_Change]) {
+  // held: disk changes not sent to the prover (cost guard), with the reason
+  sealed case class Sync_Result(changes: List[Sync_Change], held: List[(Document.Node.Name, String)] = Nil) {
     def nonEmpty: Boolean = changes.nonEmpty
     def node_names: List[Document.Node.Name] = changes.map(_.node_name)
   }
+
+  /* Disk changes held by the cost guard: the prover keeps the old text (also for read_update) until the change is
+     confirmed or undone on disk; the disk stamp is not recorded, so every synchronisation looks at it again. */
+  private val held = Synchronized(Map.empty[Document.Node.Name, String])
+
+  def held_disk_change(name: Document.Node.Name): Option[String] = held.value.get(name)
 
   private def line_ranges(doc: Line.Document, perspective: Text.Perspective): List[(Int, Int)] =
     perspective.ranges.map { range =>
@@ -449,8 +456,13 @@ class PIDE_MCP_Session private(
   }
 
   /* Update all loaded nodes whose files were changed on disk since they were last read.
-     The differences are sent to PIDE as several small edits, keeping the visible lines. */
-  def sync_disk(progress: Progress): Sync_Result =
+     The differences are sent to PIDE as several small edits, keeping the visible lines.
+     guard(name, first changed line): Some(reason) holds the change (not with confirm). */
+  def sync_disk(
+    progress: Progress,
+    guard: (Document.Node.Name, Int) => Option[String] = (_, _) => None,
+    confirm: Boolean = false
+  ): Sync_Result =
     with_lock(progress) {
       val version = tip_version(progress)
       val stamps = disk_stamps.value
@@ -461,18 +473,33 @@ class PIDE_MCP_Session private(
       }.filter { case (name, _) =>
         disk_stamp(name).exists(stamp => !stamps.get(name).contains(stamp))
       }.toList
+      var held_now = List.empty[(Document.Node.Name, String)]
       val synced = candidates.flatMap { case (name, node) =>
         Exn.result {
-          record_disk_stamp(name)
+          val stamp = disk_stamp(name)
           val text = read_file_content(name)
           val hunks = PIDE_MCP_Diff.hunks(node.source, text)
+          val reason =
+            if (confirm || hunks.isEmpty) None
+            else guard(name, hunks.map(_.old_line).min)
+          reason match {
+            case Some(r) => held.change(_ + (name -> r)); held_now ::= (name -> r)
+            case None =>
+              held.change(_ - name)
+              stamp match {
+                case Some(st) => disk_stamps.change(_ + (name -> st))
+                case None => disk_stamps.change(_ - name)
+              }
+          }
+          if (reason.nonEmpty) None else Some {
           val model = Node_Model(name, node, text,
             preserved_perspective(node.source, text, node.text_perspective))
           (Sync_Change(name, Line.Document(text).lines.length,
             hunks.map(_.changed_lines).sum, hunks.length, hunks,
             PIDE_MCP_Diff.unified(name.node.stripPrefix("/"), node.source, text)), model.edits)
+          }
         } match {
-          case Exn.Res(res) => Some(res)
+          case Exn.Res(res) => res
           case Exn.Exn(exn) if Exn.is_interrupt(exn) => throw exn
           case Exn.Exn(_) =>
             disk_stamps.change(_ - name) // retry at the next synchronisation
@@ -480,7 +507,7 @@ class PIDE_MCP_Session private(
         }
       }
       update(synced.flatMap(_._2))
-      Sync_Result(synced.map(_._1).filter(_.changed_lines > 0))
+      Sync_Result(synced.map(_._1).filter(_.changed_lines > 0), held_now.reverse)
     }
 
   private def hide_edits(
@@ -501,8 +528,10 @@ class PIDE_MCP_Session private(
     val models = with_lock(progress) {
       val version = tip_version(progress)
       val models1 = nodes.map { case (name, visible_lines) =>
-        record_disk_stamp(name)
-        val text = read_file_content(name)
+        // a held disk change stays out of the prover (cost guard)
+        val text =
+          if (held.value.contains(name)) version.nodes(name).source
+          else { record_disk_stamp(name); read_file_content(name) }
         val doc = Line.Document(text)
         val line_ranges = visible_lines.map { case (start_line, opt_end_line) =>
           (start_line, opt_end_line.getOrElse(doc.lines.length)) }

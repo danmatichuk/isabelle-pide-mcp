@@ -24,6 +24,7 @@ Read these only when you need them:
 
 - **Add a few definitions or lemmas at a time,** not hundreds of lines: errors and loops are then easy to locate.
 - **Edit with `edit`** (it returns as soon as the text is written) or with scripts (`sed`, Python) for changes in several places; `get_state` picks up disk edits. Edit one file one call after the other.
+- **Costly changes are held** (`COST GUARD`: an edit or disk change that makes Isabelle run again at least 10 s and over half of what the theory and its importers took). Prefer an `end` fence after the part you work on or a `create_scratch` copy; to apply it anyway, `confirm_cost: true` on the `edit`, or on `get_state` for a disk change (until then the prover keeps the old text).
 - **After every edit, call `get_state` right away, without `wait_seconds`,** on a narrow `start_line`/`end_line` around what you changed; check the file-wide counts too, since a local change can break later commands.
 - **A clean theory has 0 failed, 0 errors and 0 `bad`. `sorry` is reported as `bad`, not as an error.**
 - **A proof step (`apply`, `by`, `proof`, `qed`, `done`, `.`, `..`) is interrupted when its real run reaches 5 s** (`interrupted at the 5 s limit (real run)`; the commands after it wait). Its diagnostic (below) follows; then replace the method by a faster one, or, only for a step that needs longer, run it once without the limit with `retry_without_limit` (no diagnostic; `cancel` stops it; an edit brings the limit back). Some ML code does not react to interrupts.

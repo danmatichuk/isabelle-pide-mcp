@@ -39,6 +39,12 @@ option pide_mcp_auto_inspect_timeout : int = 5 for pide_mcp
 option pide_mcp_step_time_limit : real = 5.0 for pide_mcp
   -- "interrupt a proof step (apply, by, proof, qed, done, ., ..) whose real run reaches this many seconds (0: no limit); retry_without_limit runs it again without"
 
+option pide_mcp_cost_guard_ratio : real = 0.5 for pide_mcp
+  -- "hold an edit or disk change that makes Isabelle run again more than this part of the time of the theory and the theories importing it (0: no guard)"
+
+option pide_mcp_cost_guard_floor : real = 10.0 for pide_mcp
+  -- "... and at least this many seconds"
+
 option pide_mcp_possibly_looping_after : real = 30.0 for pide_mcp
   -- "label a command still_running_possibly_nonterminating once its real run has taken this many seconds (before: running)"
 

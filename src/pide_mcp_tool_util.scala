@@ -138,9 +138,17 @@ object PIDE_MCP_Tool_Util {
       File.platform_path(file)
     }
 
-  def sync_disk_edits(session: PIDE_MCP_Session, progress: Progress): Option[JSON.Object.T] = {
-    val result = session.sync_disk(progress)
-    if (result.nonEmpty) {
+  def sync_disk_edits(session: PIDE_MCP_Session, progress: Progress, confirm: Boolean = false): Option[JSON.Object.T] = {
+    def guard(name: Document.Node.Name, line: Int): Option[String] =
+      cost_guard(session, session.snapshot(), name, line,
+        s"the change of ${java.io.File(session.origin(name)).getName} on disk (from line $line)",
+        "call `get_state` with `confirm_cost: true`, or undo the change on disk. Until then the prover keeps the old " +
+          "text: the file on disk differs from what `get_state` shows")
+    val result = session.sync_disk(progress, guard, confirm)
+    val held = JSON_Object.if_proper(result.held.nonEmpty, JSON_Object("held" -> result.held.map { case (name, reason) =>
+      JSON_Object("origin" -> session.origin(name), "reason" -> reason) }))
+    if (!result.nonEmpty) Option.when(result.held.nonEmpty)(held)
+    else {
       session.await_stable_snapshot(progress)
       session.resolve_dependencies(result.node_names, progress)
       Some(JSON_Object(
@@ -169,9 +177,8 @@ object PIDE_MCP_Tool_Util {
         JSON.optional("diff_file" -> (Exn.result(write_sync_diff(session, result)) match {
           case Exn.Res(file) => file
           case Exn.Exn(_) => None // the diff is a convenience only
-        })))
+        })) ++ held)
     }
-    else None
   }
 
   // loaded theories imported (transitively) by node_name that are still being processed
@@ -286,6 +293,40 @@ object PIDE_MCP_Tool_Util {
      those from the edited line on in the edited theory and all of the theories importing it; at least floor_ms. */
   val slow_rerun_floor_ms: Long = 2000
 
+  /* The commands of node_name (from from_line: the command at that line and the later ones) and of the theories
+     importing it, with their time from their last run: PIDE times evaluations, not forked proofs, for which the
+     running clock remembers how long they ran. (theory, line, ms, rerun) */
+  private def timed_commands(
+    session: PIDE_MCP_Session,
+    before: Document.Snapshot,
+    node_name: Document.Node.Name,
+    from_line: Int
+  ): List[(Document.Node.Name, Int, Long, Boolean)] = {
+    val nodes = before.version.nodes
+    val candidates = nodes.iterator.collect { case (name, node)
+      if name.is_theory && !session.is_base_session_theory(name) && PIDE_MCP_Util.is_loaded_dynamic(node) => name }.toList
+    val names = if (node_name.is_theory) affected_theories(before, List(node_name), candidates) else Nil
+    names.flatMap { name =>
+      val snapshot = before.switch(name)
+      val doc = Line.Document(snapshot.node.source)
+      snapshot.node.command_iterator().filterNot(_._1.is_ignored).map { case (cmd, start) =>
+        val line = doc.position(start).line1
+        val end_line = doc.position(start + cmd.length).line1
+        val status = PIDE_MCP_Command.status(snapshot, cmd)
+        val ms = status.timings.sum(Date.now()).ms max
+          PIDE_MCP_Command.Running_Clock.stopped_ago(snapshot, cmd).fold(0L)(_._2.ms)
+        (name, line, ms, name != node_name || end_line >= from_line)
+      }
+    }
+  }
+
+  private def timed_entry(session: PIDE_MCP_Session, node_name: Document.Node.Name)(
+    entry: (Document.Node.Name, Int, Long, Boolean)
+  ): String = {
+    val (name, line, ms, _) = entry
+    (if (name == node_name) "" else session.origin(name) + " ") + s"line $line (${ms / 1000} s)"
+  }
+
   def slow_rerun(
     session: PIDE_MCP_Session,
     before: Document.Snapshot,
@@ -294,29 +335,49 @@ object PIDE_MCP_Tool_Util {
     limit: Int = 3
   ): List[String] =
     Exn.result {
-      val nodes = before.version.nodes
-      val candidates = nodes.iterator.collect { case (name, node)
-        if name.is_theory && !session.is_base_session_theory(name) && PIDE_MCP_Util.is_loaded_dynamic(node) => name }.toList
-      val names = if (node_name.is_theory) affected_theories(before, List(node_name), candidates) else Nil
-      val timed = names.flatMap { name =>
-        val snapshot = before.switch(name)
-        val doc = Line.Document(snapshot.node.source)
-        snapshot.node.command_iterator().filterNot(_._1.is_ignored).flatMap { case (cmd, start) =>
-          val line = doc.position(start).line1
-          val status = PIDE_MCP_Command.status(snapshot, cmd)
-          // PIDE times evaluations, not forked proofs: the running clock remembers how long those ran
-          val ms = status.timings.sum(Date.now()).ms max
-            PIDE_MCP_Command.Running_Clock.stopped_ago(snapshot, cmd).fold(0L)(_._2.ms)
-          Option.when((name != node_name || line >= from_line) && ms >= slow_rerun_floor_ms)(
-            (ms, (if (name == node_name) "" else session.origin(name) + " ") + s"line $line (${ms / 1000} s)"))
-        }
-      }
-      timed.sortBy(-_._1).take(limit).map(_._2)
+      timed_commands(session, before, node_name, from_line)
+        .filter(e => e._4 && e._3 >= slow_rerun_floor_ms && (e._1 != node_name || e._2 >= from_line))
+        .sortBy(-_._3).take(limit).map(timed_entry(session, node_name))
     } match {
       case Exn.Res(list) => list
       case Exn.Exn(exn) if Exn.is_interrupt(exn) => throw exn
       case Exn.Exn(_) => Nil
     }
+
+  /* The cost guard (pide_mcp_cost_guard_ratio, pide_mcp_cost_guard_floor): a change from from_line that makes
+     Isabelle run again at least the floor and more than the ratio of what node_name and the theories importing it
+     took (their previous run; unknown times count as 0, so a first load is never held). Some(message): hold it. */
+  def cost_guard(
+    session: PIDE_MCP_Session,
+    before: Document.Snapshot,
+    node_name: Document.Node.Name,
+    from_line: Int,
+    what: String,
+    confirm: String
+  ): Option[String] = {
+    val ratio = session.options.real("pide_mcp_cost_guard_ratio")
+    val floor_ms = (session.options.real("pide_mcp_cost_guard_floor") * 1000).toLong
+    if (ratio <= 0 || !node_name.is_theory) None
+    else Exn.result {
+      val timed = timed_commands(session, before, node_name, from_line)
+      val total = timed.map(_._3).sum
+      val rerun = timed.filter(_._4).map(_._3).sum
+      Option.when(total > 0 && rerun >= floor_ms && rerun > ratio * total) {
+        val file = session.origin(node_name)
+        val dependents = timed.exists(_._1 != node_name)
+        val top = timed.filter(e => e._4 && e._3 >= slow_rerun_floor_ms).sortBy(-_._3).take(3).map(timed_entry(session, node_name))
+        s"COST GUARD: $what would make Isabelle run again ${rerun / 1000} s of the ${total / 1000} s that " +
+          java.io.File(file).getName + (if (dependents) " and the theories importing it" else "") + " took" +
+          (if (top.isEmpty) "" else ": " + top.mkString(", ")) + ". Cheaper: put an `end` fence after the part you work " +
+          "on (the commands after it then do not run), or experiment in a scratch theory (`create_scratch` with " +
+          s"`copy_from` and `up_to_line`). To apply it anyway: $confirm"
+      }
+    } match {
+      case Exn.Res(res) => res
+      case Exn.Exn(exn) if Exn.is_interrupt(exn) => throw exn
+      case Exn.Exn(_) => None
+    }
+  }
 
   // failed or sorry'd commands before the requested range: later commands may rest on them although they show finished
   def earlier_problems_note(
