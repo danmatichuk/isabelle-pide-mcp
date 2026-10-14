@@ -107,17 +107,28 @@ object PIDE_MCP_Render {
     }
     val kinds = str_list(loc.getOrElse("kinds", Nil)).mkString(",")
     val inspection = loc.get("inspection").map(obj)
+    val interrupted = loc.contains("interrupted_at_limit_seconds")
     s"line $range  [$kinds]" + loc.get("running_seconds").fold("")(s => "  (running for " +
       loc.get("running_ms").collect { case ms: Long if ms < 1000 => s"$ms ms"; case ms: Int if ms < 1000 => s"$ms ms" }
         .getOrElse(s"${scalar(s)} s") +
       loc.get("interrupt_sent_seconds").fold("")(i => s"; interrupt sent ${scalar(i)} s ago, waiting for it to stop") +
+      (if (loc.contains("no_time_limit")) "; no time limit" else "") +
       inspection.fold("")(diagnostic_note) + ")") +
       loc.get("first_message").fold("")(m => "  " + scalar(m)) +
+      (if (interrupted) inspection.fold("")(diagnostic_note) else "") +
       inspection.filter(_ => with_inspection).fold("")(i =>
-        inspection_lines(i, loc.contains("running_seconds")).map("\n   " + _).mkString)
+        inspection_lines(i, loc.contains("running_seconds") || interrupted).map("\n   " + _).mkString) +
+      retry_line(loc).filter(_ => with_inspection).fold("")("\n   " + _)
   }
 
-  private val entry_skip = Set("status", "timing_ms", "source", "kinds", "interrupt_sent_seconds", "inspection")
+  private val entry_skip = Set("status", "timing_ms", "source", "kinds", "interrupt_sent_seconds", "inspection",
+    "interrupted_at_limit_seconds", "no_time_limit")
+
+  // a step interrupted at the time limit, once its diagnostic is done (or there is none): how to run it without
+  private def retry_line(cmd: Map[String, Any]): Option[String] =
+    Option.when(cmd.contains("interrupted_at_limit_seconds") &&
+        !cmd.get("inspection").exists(i => obj(i).get("status").contains("running")))(
+      PIDE_MCP_Step_Limit.retry_note(cmd.get("line").map(scalar).getOrElse("N").toIntOption.getOrElse(0)))
 
   // the diagnostic (instrumented copy of the method) of a command whose real run is still going on: its own time
   private def diagnostic_note(i: Map[String, Any]): String =
@@ -154,6 +165,10 @@ object PIDE_MCP_Render {
         log.toList
     }
 
+  // the first line of a full entry ("N: source")
+  private def source_line(cmd: Map[String, Any]): Int =
+    scalar(cmd.getOrElse("source", "")).takeWhile(_.isDigit).toIntOption.getOrElse(0)
+
   private def command_lines(cmd: Map[String, Any]): List[String] = {
     val source = scalar(cmd.getOrElse("source", "")).linesIterator.toList
     val status = str_list(cmd.getOrElse("status", Nil)).mkString(",")
@@ -170,7 +185,10 @@ object PIDE_MCP_Render {
           case ms: Int if ms >= 1000 => s"running for ${ms / 1000} s" + inspection.fold("")(diagnostic_note)
           case _ => s"running for ${scalar(t)} ms" + inspection.fold("")(diagnostic_note)
         }),
-      cmd.get("interrupt_sent_seconds").map(i => s"interrupt sent ${scalar(i)} s ago, waiting for it to stop")).flatten.mkString("; ")
+      cmd.get("interrupt_sent_seconds").map(i => s"interrupt sent ${scalar(i)} s ago, waiting for it to stop"),
+      Option.when(cmd.contains("no_time_limit"))("no time limit"),
+      cmd.get("interrupted_at_limit_seconds").map(l =>
+        s"interrupted at the ${scalar(l)} s limit (real run)" + inspection.fold("")(diagnostic_note))).flatten.mkString("; ")
     val extra = cmd.toList.filterNot(p => entry_skip.contains(p._1)).flatMap {
       case ("bad", bad) =>
         list(bad).map { b =>
@@ -180,7 +198,9 @@ object PIDE_MCP_Render {
         }
       case (key, v) => entry(key, v)
     }
-    source ::: indent(3, s"[$info]" :: extra ::: inspection.toList.flatMap(inspection_lines(_, running)))
+    val interrupted = cmd.contains("interrupted_at_limit_seconds")
+    source ::: indent(3, s"[$info]" :: extra ::: inspection.toList.flatMap(inspection_lines(_, running || interrupted)) :::
+      retry_line(cmd + ("line" -> source_line(cmd))).toList)
   }
 
   private def is_full(cmd: Map[String, Any]): Boolean = cmd.contains("source")

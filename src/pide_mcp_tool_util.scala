@@ -396,8 +396,10 @@ object PIDE_MCP_Tool_Util {
       if (busy || failure.isEmpty) (provisional_note(unprocessed + running, waiting), None)
       else {
         val (line, message) = failure.get
+        val retry = Option.when(message.contains(" s limit (real run)"))(
+          s" (or run it without the limit: `retry_without_limit`, start_line $line)").getOrElse("")
         (None, Some(s"BLOCKED, NOT RUNNING: nothing in this file is running, and $unprocessed command(s) stay unprocessed because of the failure " +
-          s"at line $line. Waiting or repeating this call changes nothing until that is fixed: $message"))
+          s"at line $line. Waiting or repeating this call changes nothing until that is fixed$retry: $message"))
       }
     }
   }

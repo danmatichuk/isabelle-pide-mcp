@@ -582,6 +582,18 @@ class PIDE_MCP_Session private(
     }
   }
 
+  /* Let PIDE evaluate a command again although its text is unchanged (e.g. after a cancel): its text is removed and
+     inserted again, in the prover's copy only (the file is not touched), which makes it a new command. */
+  def reevaluate(node_name: Document.Node.Name, range: Text.Range, progress: Progress): Unit =
+    with_lock(progress) {
+      val node = tip_version(progress).nodes(node_name)
+      val text = node.source
+      val model = Node_Model(node_name, node, text, node.text_perspective)
+      val source = range.substring(text)
+      update(model.node_edits(model.node_header,
+        List(Text.Edit.remove(range.start, source), Text.Edit.insert(range.start, source)), model.node_perspective))
+    }
+
   private def unload_edits(
     node_name: Document.Node.Name,
     node: Document.Node

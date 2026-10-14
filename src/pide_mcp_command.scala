@@ -488,6 +488,13 @@ object PIDE_MCP_Command {
     // interrupted by `cancel` or a time limit, after this many ms (not once it runs again)
     lazy val canceled_ms: Option[Long] =
       Running_Clock.canceled_ms(snapshot, cmd).filter(_ => !cmd_status.is_running)
+    // interrupted at the step time limit (pide_mcp_step_limit), or running without it (a retry)
+    lazy val interrupted_at: Option[Double] =
+      PIDE_MCP_Step_Limit.interrupted_at(snapshot, cmd).filter(_ => canceled_ms.nonEmpty)
+    lazy val no_time_limit: Boolean = PIDE_MCP_Step_Limit.is_unlimited(snapshot, cmd)
+    private lazy val canceled_text: Option[String] =
+      canceled_ms.map(ms => interrupted_at.fold(s"cancelled after ${ms / 1000} s")(limit =>
+        s"interrupted at the ${PIDE_MCP_Util.seconds_text(limit)} s limit (real run)"))
 
     lazy val status: List[String] = {
       val list = status_list(cmd_status).filter {
@@ -554,8 +561,8 @@ object PIDE_MCP_Command {
         .orElse(bad.headOption.flatMap(_.get("message")).collect { case s: String => message_line(s) })
         .orElse(outside_hint)
         .filter(_.nonEmpty)
-        .map(line => canceled_ms.fold(line)(ms => s"cancelled after ${ms / 1000} s; $line"))
-        .orElse(canceled_ms.map(ms => s"cancelled after ${ms / 1000} s"))
+        .map(line => canceled_text.fold(line)(c => s"$c; $line"))
+        .orElse(canceled_text)
         .map(line =>
           if (line.length <= max_length) line
           else {  // cut at a word boundary
@@ -576,6 +583,8 @@ object PIDE_MCP_Command {
         Option.when(status.contains(Status.running))("running_seconds" -> running_ms / 1000),
         Option.when(status.contains(Status.running))("running_ms" -> running_ms),  // the real run
         interrupt_sent_seconds.map("interrupt_sent_seconds" -> _),
+        interrupted_at.map("interrupted_at_limit_seconds" -> _),
+        Option.when(no_time_limit)("no_time_limit" -> true),
         first_message().filter(_.nonEmpty).map("first_message" -> _),
         inspection.map("inspection" -> _)))
     }
@@ -593,6 +602,8 @@ object PIDE_MCP_Command {
           Some("status" -> shown_status),
           Some("timing_ms" -> (timing_ms max running_ms)),
           interrupt_sent_seconds.map("interrupt_sent_seconds" -> _),
+          interrupted_at.map("interrupted_at_limit_seconds" -> _),
+          Option.when(no_time_limit)("no_time_limit" -> true),
           Some("source" -> source),
           inspection.map("inspection" -> _),
           outside_hint.map("hint" -> _),

@@ -24,7 +24,7 @@ When automation is brittle or explodes, switch to a structured Isar proof with i
 
 ## How Long a Method May Take
 
-- **Most methods take well under a second, a few about a second.** 5 s is rarely expected; 10 s is acceptable only if the faster alternative needs more than a few lines of proof text.
+- **Most methods take well under a second, a few about a second.** 5 s is rarely expected, and the PIDE MCP interrupts a proof step at 5 s (see the `pide-mcp` skill); running one longer (10 s) is acceptable only if the faster alternative needs more than a few lines of proof text.
 - **At 30 s something has almost certainly gone wrong: restructure** (smaller steps, intermediate lemmas, fewer unfoldings) instead of accepting it, also when the step finishes. A VCG (`runs_to_vcg`-style methods) is the rare method that may take longer, but 30 s is still very suspicious.
 
 ## Searching Theorems and Constants

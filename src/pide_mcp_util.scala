@@ -89,6 +89,10 @@ object PIDE_MCP_Util {
   def restrict_text_range(text: String, range: Option[Text.Range]): Text.Range =
     intersect_range(Text.Range.length(text), range)
 
+  // seconds as written in options: 5.0 -> "5", 2.5 -> "2.5"
+  def seconds_text(seconds: Double): String =
+    if (seconds == seconds.round.toDouble) seconds.round.toString else seconds.toString
+
   def elem_body_plain_text(elem: XML.Elem): String =
     Pretty.string_of(Qualify_Names.body(elem.body), pure = true)
 

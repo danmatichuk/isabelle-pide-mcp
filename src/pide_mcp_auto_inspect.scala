@@ -294,9 +294,10 @@ class PIDE_MCP_Auto_Inspector(session: PIDE_MCP_Session) {
   // probes to run, oldest first (bounded: the oldest are dropped)
   private val pending = Synchronized(Vector.empty[(Key, Command, String)])
 
+  // one probe per evaluation and kind (failed, or slow: running long or interrupted at the step time limit)
   private def enqueue(key: Key, cmd: Command, trigger: String): Unit =
     pending.change(queue =>
-      if (queue.exists(q => q._1 == key && q._3 == trigger) || skipped.value(key) ||
+      if (queue.exists(q => q._1 == key && (q._3 == "failed") == (trigger == "failed")) || skipped.value(key) ||
           known(key) && !(trigger == "failed" && needs_suggestions(key))) queue
       else (queue :+ (key, cmd, trigger)).takeRight(pending_max))
 
@@ -313,12 +314,16 @@ class PIDE_MCP_Auto_Inspector(session: PIDE_MCP_Session) {
           key <- PIDE_MCP_Auto_Inspect.key(node_snapshot, cmd)
         } {
           val status = PIDE_MCP_Command.status(node_snapshot, cmd)
-          if (status.is_running) {
+          if (PIDE_MCP_Step_Limit.is_unlimited(node_snapshot, cmd)) running.change(_ - key)  // a retry: no inspection
+          else if (status.is_running) {
             if (step_commands(cmd.span.name)) running.change(m => if (m.contains(key)) m else m + (key -> (cmd, now)))
           }
           else {
             running.change(_ - key)
-            if (fail_commands(cmd.span.name) && status.is_failed &&
+            val limit = PIDE_MCP_Step_Limit.interrupted_at(node_snapshot, cmd)
+            if (limit.nonEmpty && fail_commands(cmd.span.name))
+              enqueue(key, cmd, s"interrupted at the ${PIDE_MCP_Util.seconds_text(limit.get)} s limit")
+            else if (fail_commands(cmd.span.name) && status.is_failed &&
                 PIDE_MCP_Command.Running_Clock.canceled_ms(node_snapshot, cmd).isEmpty)
               enqueue(key, cmd, "failed")
           }
@@ -327,12 +332,13 @@ class PIDE_MCP_Auto_Inspector(session: PIDE_MCP_Session) {
     }
   session.session.commands_changed += consumer
 
-  // the probe is still wanted: same evaluation of a command still in its node, not cancelled
+  // the probe is still wanted: same evaluation of a command still in its node, not cancelled (except at the step limit)
   private def valid(key: Key, cmd: Command): Boolean = {
     val snapshot = session.node_snapshot(cmd.node_name)
     snapshot.node.commands.contains(cmd) &&
       PIDE_MCP_Auto_Inspect.key(snapshot, cmd).contains(key) &&
-      PIDE_MCP_Command.Running_Clock.canceled_ms(snapshot, cmd).isEmpty
+      (PIDE_MCP_Command.Running_Clock.canceled_ms(snapshot, cmd).isEmpty ||
+        PIDE_MCP_Step_Limit.interrupted_at(snapshot, cmd).nonEmpty)
   }
 
   // follow-on failures (an earlier command of the same proof failed) are not probed: they would repeat its result

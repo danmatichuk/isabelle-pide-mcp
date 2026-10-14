@@ -44,14 +44,16 @@ object Tool_Cancel {
     min_ms: Long = 0
   ): List[Canceled] = {
     val found = running(session, node_name, start_line, end_line, min_ms)
-    for ((state, canceled) <- found) {
-      val snapshot = state.snapshot
-      PIDE_MCP_Command.Running_Clock.cancel(snapshot, state.cmd, canceled.running_ms)
-      val execs = snapshot.state.assignments.get(snapshot.version.id)
-        .flatMap(_.command_execs.get(state.cmd.id)).getOrElse(Nil)  // the evaluation and the print functions
-      execs.foreach(session.session.cancel_exec)
-    }
+    for ((state, canceled) <- found) cancel_command(session, state.snapshot, state.cmd, canceled.running_ms)
     found.map(_._2)
+  }
+
+  // interrupt a command: its evaluation and its print functions
+  def cancel_command(session: PIDE_MCP_Session, snapshot: Document.Snapshot, cmd: Command, running_ms: Long): Unit = {
+    PIDE_MCP_Command.Running_Clock.cancel(snapshot, cmd, running_ms)
+    val execs = snapshot.state.assignments.get(snapshot.version.id)
+      .flatMap(_.command_execs.get(cmd.id)).getOrElse(Nil)
+    execs.foreach(session.session.cancel_exec)
   }
 
   // after an edit: cancel the commands of the edited lines that run longer than the limit, until the lines are processed,
@@ -153,4 +155,54 @@ class Tool_Cancel extends PIDE_MCP_Tool("cancel") {
     }
 }
 
-class Tools_Cancel extends PIDE_MCP_Tools(new Tool_Cancel)
+class Tool_Retry_Without_Limit extends PIDE_MCP_Tool("retry_without_limit") {
+  // the step time limit, one watcher per session
+  private val limits = Synchronized(Map.empty[String, PIDE_MCP_Step_Limit])
+
+  override def start(sessions: PIDE_MCP_Sessions, session: PIDE_MCP_Session, progress: Progress): Unit =
+    if (session.options.real("pide_mcp_step_time_limit") > 0)
+      limits.change(_ + (session.id -> new PIDE_MCP_Step_Limit(session)))
+
+  override def stop(sessions: PIDE_MCP_Sessions, session: PIDE_MCP_Session, progress: Progress): Unit =
+    limits.change_result(m => (m.get(session.id), m - session.id)).foreach(_.stop())
+
+  def description: String =
+    "Run a proof step again that was interrupted at the time limit for proof steps (or cancelled), without the " +
+      "limit and without automatic inspection, once: the command at `start_line` runs until it finishes or `cancel` " +
+      "stops it. An edit of the command brings the limit back."
+
+  def input_schema: JSON.Object.T = PIDE_MCP_Tool_Schema.input_schema(
+    List(PIDE_MCP_Tool_Schema.running_session_arg, PIDE_MCP_Tool_Schema.origin_arg,
+      PIDE_MCP_Tool_Schema.start_line_arg))
+
+  def handle(
+    sessions: PIDE_MCP_Sessions,
+    args: JSON.Object.T,
+    progress: Progress
+  ): PIDE_MCP_Tool_Result =
+    PIDE_MCP_Tool_Result.text {
+      val session = PIDE_MCP_Tool_Util.running_session_param(sessions, args)
+      val node_name = PIDE_MCP_Tool_Util.origin_param(session, args)
+      if (!node_name.is_theory) error("Not a theory")
+      val snapshot = PIDE_MCP_Tool_Util.require_loaded_origin_snapshot(session, node_name, progress, 0)
+      val doc = Line.Document(snapshot.node.source)
+      val line = PIDE_MCP_Tool_Schema.start_line_arg.get(args)
+      val found = PIDE_MCP_Util.text_range(doc, line, line).toList.flatMap(range =>
+        PIDE_MCP_Command.State.commands(snapshot, Some(range)).toList)
+        .filter(state => PIDE_MCP_Command.Running_Clock.canceled_ms(snapshot, state.cmd).nonEmpty)
+      found.headOption match {
+        case None =>
+          error(s"No interrupted or cancelled command at line $line: `get_state` shows them as `canceled`")
+        case Some(state) =>
+          val start = state.command_range.start
+          PIDE_MCP_Step_Limit.retries.change(PIDE_MCP_Step_Limit.Retry(state.cmd.id, node_name, start,
+            state.cmd.source, Time.now()) :: _)
+          session.reevaluate(node_name, state.command_range, progress)
+          JSON_Object("retrying" -> JSON_Object("line" -> doc.position(start).line1, "command" -> state.cmd.span.name),
+            "note" -> ("it runs without the time limit and without automatic inspection until it finishes; " +
+              "`get_state` shows it, `cancel` stops it; an edit of it brings the limit back"))
+      }
+    }
+}
+
+class Tools_Cancel extends PIDE_MCP_Tools(new Tool_Cancel, new Tool_Retry_Without_Limit)
