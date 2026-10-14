@@ -213,8 +213,8 @@ class Tool_Edit extends PIDE_MCP_Tool("edit") {
 
   private val check_wait_arg = PIDE_MCP_Tool_Arg.int_default(
     "check_wait_seconds",
-    "With `check`: wait up to this many seconds for the file (and its imports) to settle before the status is taken, " +
-      "so that the result is usually final and no separate `get_state` with `wait_settled` is needed. 0: do not wait.",
+    "With `check`: wait up to this many seconds for the file (and its imports) to settle before the status is taken. " +
+      "0: do not wait.",
     30, minimum = Some(0), maximum = Some(600))
   private val check_ml_arg = PIDE_MCP_Tool_Arg.bool_default(
     "check_ml",
@@ -224,9 +224,10 @@ class Tool_Edit extends PIDE_MCP_Tool("edit") {
     true)
   private val check_arg = PIDE_MCP_Tool_Arg.bool_default(
     "check",
-    "Also return the status of the whole file after processing the edit (counts of failed commands, errors,... and the " +
-      "first problem), so that no separate `get_state` is needed to see whether the edit worked. " +
-      "Commands may still be running if the file is large; use `get_state` with `wait_seconds` then.",
+    "Opt-in: also wait (up to `check_wait_seconds`) for the file to be processed and return the status of the whole file " +
+      "(counts of failed commands, errors,... and the first problem). The call blocks while slow commands run. " +
+      "Default: return right after writing; then call `get_state` (no waiting needed): commands still running after " +
+      "a few seconds are a hint to replace a slow method.",
     false)
 
   def input_schema: JSON.Object.T = PIDE_MCP_Tool_Schema.input_schema(

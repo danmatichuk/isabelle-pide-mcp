@@ -19,7 +19,7 @@ object PIDE_MCP_Protocol {
       "Some sessions might have already been started. " +
       "Add material incrementally: large edits make errors and nontermination hard to isolate. " +
       "If skills are available, load the `pide-mcp` skill before using these tools and the `isabelle-proof-development` skill whenever you prove something. " +
-      "After every edit (also scripted ones) check the file with `get_state`. " +
+      "After every edit (also scripted ones) check the file with `get_state`, without waiting: a command that is still running after a few seconds is a hint to replace a slow method. " +
       "To look up theorems or constants of imported theories, use `find_theorems` / `find_consts` instead of grepping the sources: search by name (`name: rev`) or by pattern (`\"rev (rev ?xs) = ?xs\"`). " +
       "If a tool call fails because the server or session is broken (not because of Isabelle content), tell the user instead of switching to batch builds. " +
       "If your client defers tools, load the proof tools (`sledgehammer`, `suggest_facts`, `find_theorems`, `find_consts`, `create_scratch`) up front, together with the ones you start with. " +

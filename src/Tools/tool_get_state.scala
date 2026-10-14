@@ -88,7 +88,7 @@ class Tool_Get_State extends PIDE_MCP_Tool("get_state") {
   private val wait_seconds_arg = PIDE_MCP_Tool_Arg.int_default(
     "wait_seconds",
     "If the file is not loaded or not processed yet, wait up to this many seconds for it instead of failing right away. " +
-      "This also waits while the file only waits for imported theories that are still being processed (e.g. after editing an imported file); " +
+      "This also waits while the file only waits for imported theories that are still being processed; " +
       "the result then lists them as `waiting_for`. " +
       "Use this after the first request for a file to save a round trip. " +
       "If this call synchronised external edits from disk, it waits up to 30 seconds for the file to settle even without wait_seconds. " +
@@ -99,7 +99,8 @@ class Tool_Get_State extends PIDE_MCP_Tool("get_state") {
     "With `wait_seconds`: do not return as soon as the file is being processed, but wait until the file and the imported " +
       "theories it depends on are completely processed or the file has a failed command (whichever comes first), " +
       "or until the time is up. Imported theories that are still pending are listed as `waiting_for`. " +
-      "Use this after an edit of an imported file instead of polling. Without `wait_seconds` it waits up to 60 seconds. " +
+      "Not needed after an edit: call `get_state` without waiting and treat commands that are still running as a hint to " +
+      "reconsider a slow method. Without `wait_seconds` it waits up to 60 seconds. " +
       "Commands that failed before do not end the wait.",
     false)
   private val stop_at_error_arg = PIDE_MCP_Tool_Arg.bool_default(

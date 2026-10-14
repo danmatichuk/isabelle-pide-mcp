@@ -4,6 +4,7 @@ PIDE MCP NEWS -- history of user-relevant changes
 New in this PIDE MCP version
 ----------------------------
 
+* Non-blocking edit loop: the skills, the server instructions and the tool descriptions no longer recommend `edit` with `check: true` or `get_state` with `wait_settled` after an edit (both block while a slow method runs, 3-9 minutes per task in one comparison). After an edit, call `get_state` without waiting and treat commands still running after a few seconds as a hint to replace a slow method. `check` stays an opt-in (default false); the PROVISIONAL note says to call `get_state` again instead of waiting.
 * Add Isabelle/ML skill file.
 * New tool `suggest_facts` lists the facts that Sledgehammer's relevance filter (MePo/MaSh) selects for the goal at a position, most relevant first, without running provers. It loads the helper theory [ml/PIDE\_MCP\_Suggest.thy](./ml/PIDE_MCP_Suggest.thy) into the session on demand, which registers a PIDE query operation. Needs a HOL-based session.
 * New tools `find_theorems` and `find_consts` run Isabelle's searches as PIDE queries at a position of a file without modifying it (before, the agent had to insert the Isar commands into a theory). The skills and the server instructions recommend them over grepping imported sources.

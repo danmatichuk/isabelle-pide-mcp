@@ -389,7 +389,7 @@ object PIDE_MCP_Tool_Util {
         "waiting for imported theories still being processed: " + waiting.map(_.origin).mkString(", "))).flatten
     Option.when(reasons.nonEmpty)(
       "PROVISIONAL RESULT, errors and counts below may be transient (" + reasons.mkString("; ") +
-        "): repeat with wait_seconds and wait_settled before acting on them")
+        "): call `get_state` again for the final result; a command that keeps running may be a slow method to replace")
   }
 
   /* A theory whose header failed on an import (`Bad theory import`) stays failed even when the imported theory appears later
