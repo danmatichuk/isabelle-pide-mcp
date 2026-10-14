@@ -117,14 +117,22 @@ object PIDE_MCP_Render {
   // the automatic inspection of a step: at most three lines
   def inspection_lines(i: Map[String, Any]): List[String] =
     if (i.get("status").contains("running")) List("auto-inspect: running (the same method in the background)")
-    else
-      (s"auto-inspect (${scalar(i.getOrElse("trigger", "?"))}): the method ${scalar(i.getOrElse("outcome", "?"))}, " +
-        s"${scalar(i.getOrElse("uses", 0))} rule uses") ::
-        str_list(i.getOrElse("loops", Nil)).take(1) :::
-        (str_list(i.getOrElse("top_rules", Nil)) match {
-          case Nil => Nil
-          case l => List("top rules: " + l.mkString(", ") + i.get("log").fold("")(l => s"; full trace: ${scalar(l)}"))
-        })
+    else {
+      val trigger = scalar(i.getOrElse("trigger", "?"))
+      val log = i.get("log").map(l => s"log: ${scalar(l)}")
+      val inspected = i.contains("outcome")
+      val head =
+        if (inspected)
+          s"auto-inspect ($trigger): `${scalar(i.getOrElse("method", "?"))}` ${scalar(i.getOrElse("outcome", "?"))}, " +
+            s"${scalar(i.getOrElse("uses", 0))} rule uses"
+        else s"auto-inspect ($trigger): no method of its own to replay"
+      val top = str_list(i.getOrElse("top_rules", Nil))
+      val suggested = str_list(i.getOrElse("suggested_facts", Nil))
+      head :: str_list(i.getOrElse("loops", Nil)).take(1) :::
+        Option.when(top.nonEmpty)("top rules: " + top.mkString(", ")).toList :::
+        Option.when(suggested.nonEmpty)("suggested facts: " + suggested.mkString(", ")).toList :::
+        log.toList
+    }
 
   private def command_lines(cmd: Map[String, Any]): List[String] = {
     val source = scalar(cmd.getOrElse("source", "")).linesIterator.toList

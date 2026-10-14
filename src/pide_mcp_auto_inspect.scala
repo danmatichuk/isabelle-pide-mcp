@@ -1,9 +1,11 @@
 /*  Title:      PIDE_MCP/pide_mcp_auto_inspect.scala
 
 Automatic inspection of slow or failed proof steps: the method of an `apply`/`by` step that runs for
-pide_mcp_auto_inspect_after seconds, or that fails, is run again in the background by the apply_inspect
-instrumentation on the same goal (the state after the command before the step). get_state shows the most
-used rules, loop warnings and a log file with every use in order.
+pide_mcp_auto_inspect_after seconds, or of any proof command that fails (`apply`, `by`, `proof`, `qed`, `.`,
+`..`; for `done` the last `apply` before it), is run again in the background by the apply_inspect
+instrumentation on the same goal (the state after the command before it). For a failure, Sledgehammer's
+relevance filter also suggests facts for that goal. get_state shows the most used rules, loop warnings,
+suggested facts and a log file with every use in order and all suggestions.
 */
 
 package isabelle.pide.mcp
@@ -12,11 +14,14 @@ import isabelle._
 
 object PIDE_MCP_Auto_Inspect {
   val operation: String = "pide_mcp_apply_trace"
-  val step_commands: Set[String] = Set("apply", "by")
+  val step_commands: Set[String] = Set("apply", "by")  // probed when they run long
+  val fail_commands: Set[String] = Set("apply", "by", "done", "qed", "proof", ".", "..")  // probed when they fail
+  val suggest_max: Int = 20
+  val suggest_shown: Int = 5
   val top_rules: Int = 5
   val trace_max: Int = 5000
   val results_keep: Int = 200
-  val pending_max: Int = 8
+  val pending_max: Int = 16
 
   type Key = (Document_ID.Command, Document_ID.Exec)
 
@@ -27,12 +32,16 @@ object PIDE_MCP_Auto_Inspect {
     top: List[String],
     uses: Int,
     log: Option[String],
-    elapsed: Time = Time.zero
+    elapsed: Time = Time.zero,
+    method: Option[String] = None,
+    suggested: List[String] = Nil
   ) {
     def json: JSON.Object.T =
-      JSON_Object("trigger" -> trigger, "outcome" -> outcome, "top_rules" -> top, "uses" -> uses,
-        "probe_seconds" -> (elapsed.ms / 100).toDouble / 10) ++
+      JSON_Object("trigger" -> trigger, "uses" -> uses, "probe_seconds" -> (elapsed.ms / 100).toDouble / 10) ++
+        JSON.optional("method" -> method) ++
+        JSON_Object.if_proper(outcome.nonEmpty, JSON_Object("outcome" -> outcome, "top_rules" -> top)) ++
         JSON_Object.if_proper(loops.nonEmpty, JSON_Object("loops" -> loops)) ++
+        JSON_Object.if_proper(suggested.nonEmpty, JSON_Object("suggested_facts" -> suggested)) ++
         JSON.optional("log" -> log)
   }
 
@@ -47,6 +56,24 @@ object PIDE_MCP_Auto_Inspect {
     key(snapshot, cmd).flatMap(results.value.get)
 
   def known(key: Key): Boolean = results.value.contains(key)
+
+  // probed while running, now failed: the suggestions are still to come
+  def needs_suggestions(key: Key): Boolean =
+    results.value.get(key).exists(_.exists(r => r.suggested.isEmpty && r.trigger.startsWith("running")))
+
+  private[mcp] def add_suggestions(key: Key, suggestions: List[String], session_id: String): Unit =
+    if (suggestions.nonEmpty) {
+      val log = Exn.result(Tool_Apply_Inspect.write_file(session_id,
+        cat_lines("suggested facts (Sledgehammer's relevance filter, most relevant first):" :: suggestions.map("  " + _)) + "\n",
+        prefix = "auto_suggest")) match { case Exn.Res(p) => Some(p); case Exn.Exn(_) => None }
+      results.change(map => map.get(key) match {
+        case Some(Some(r)) =>
+          map + (key -> Some(r.copy(trigger = r.trigger + ", then failed",
+            suggested = suggestions.take(suggest_shown).map(_.takeWhile(_ != ':').trim),
+            log = r.log.map(l => l + log.fold("")(" and " + _)).orElse(log))))
+        case _ => map
+      })
+    }
 
   def json(snapshot: Document.Snapshot, cmd: Command): Option[JSON.Object.T] =
     get(snapshot, cmd).map {
@@ -67,10 +94,22 @@ object PIDE_MCP_Auto_Inspect {
   private[mcp] def finish(key: Key, result: Option[Result]): Unit =
     results.change(map => result.fold(map - key)(r => map + (key -> Some(r))))
 
-  // the first method of a step: `apply (simp add: x)` -> `(simp add: x)`, `by auto simp` -> `auto`
-  def method_text(source: String): Option[String] = {
-    val rest = source.trim.dropWhile(c => !c.isWhitespace && c != '(').trim
-    if (rest.isEmpty) None
+  // the methods of a step: `apply (simp add: x)` -> `(simp add: x)`, `by auto simp` -> `auto`, `simp`
+  def methods(source: String): List[String] = {
+    @annotation.tailrec
+    def loop(rest: String, acc: List[String]): List[String] =
+      first_method(rest) match {
+        case Some(m) if acc.length < 2 => loop(rest.trim.drop(m.length), m :: acc)
+        case _ => acc.reverse
+      }
+    loop(source.trim.dropWhile(c => !c.isWhitespace && c != '('), Nil)
+  }
+
+  def method_text(source: String): Option[String] = methods(source).headOption
+
+  private def first_method(text: String): Option[String] = {
+    val rest = text.trim
+    if (rest.isEmpty || rest.startsWith("(*") || rest.startsWith("\\<comment>")) None
     else if (rest.head == '(') {
       var depth = 0
       var i = 0
@@ -89,7 +128,7 @@ object PIDE_MCP_Auto_Inspect {
   }
 
   // the text of the trace operation: outcome, loop lines, "counts:" lines, "trace:" lines
-  def parse(trigger: String, text: String, session_id: String): Result = {
+  def parse(trigger: String, text: String, session_id: String, suggestions: List[String] = Nil): Result = {
     val lines = split_lines(text)
     val (head, rest) = lines.span(_ != "counts:")
     val (counts, trace) = rest.drop(1).span(_ != "trace:")
@@ -99,15 +138,24 @@ object PIDE_MCP_Auto_Inspect {
       s"${name.trim} ×$n"
     }
     val uses = count_lines.flatMap(_.takeWhile(_ != ' ').toIntOption).sum
-    val log = Option.when(count_lines.nonEmpty)(Exn.result(Tool_Apply_Inspect.write_file(session_id,
-      cat_lines(List(s"trigger: $trigger", "outcome: " + head.headOption.getOrElse("?")) :::
-        head.drop(1) ::: ("counts (uses, theorem):" :: count_lines.map("  " + _)) :::
-        ("trace (in order, `source: theorem`):" :: trace.drop(1))) + "\n", prefix = "auto_inspect")) match {
+    val inspected = text.nonEmpty
+    val suggested_lines =
+      if (suggestions.isEmpty) Nil
+      else ("suggested facts (Sledgehammer's relevance filter, most relevant first):" :: suggestions.map("  " + _))
+    val log = Option.when(count_lines.nonEmpty || suggestions.nonEmpty)(Exn.result(Tool_Apply_Inspect.write_file(session_id,
+      cat_lines(List(s"trigger: $trigger") :::
+        (if (!inspected) Nil
+         else ("outcome: " + head.headOption.getOrElse("?")) :: head.drop(1) :::
+          ("counts (uses, theorem):" :: count_lines.map("  " + _))) :::
+        suggested_lines :::
+        (if (!inspected) Nil else "trace (in order, `source: theorem`):" :: trace.drop(1))) + "\n",
+      prefix = "auto_inspect")) match {
       case Exn.Res(path) => Some(path)
       case Exn.Exn(_) => None
     }).flatten
-    Result(trigger, head.headOption.getOrElse("no result").stripPrefix("error: "),
-      head.drop(1).filter(_.startsWith("***")), top, uses, log)
+    Result(trigger, if (!inspected) "" else head.headOption.getOrElse("no result").stripPrefix("error: "),
+      head.drop(1).filter(_.startsWith("***")), top, uses, log,
+      suggested = suggestions.take(suggest_shown).map(s => s.takeWhile(_ != ':').trim))
   }
 }
 
@@ -119,6 +167,7 @@ class PIDE_MCP_Auto_Inspector(session: PIDE_MCP_Session) {
 
   @volatile private var active = true
   @volatile private var ready = false  // helper theory loaded
+  @volatile private var suggest_ready = false
 
   // steps that run, since when (by evaluation)
   private val running = Synchronized(Map.empty[Key, (Command, Time)])
@@ -127,7 +176,8 @@ class PIDE_MCP_Auto_Inspector(session: PIDE_MCP_Session) {
 
   private def enqueue(key: Key, cmd: Command, trigger: String): Unit =
     pending.change(queue =>
-      if (queue.exists(_._1 == key) || known(key)) queue
+      if (queue.exists(q => q._1 == key && q._3 == trigger) || skipped.value(key) ||
+          known(key) && !(trigger == "failed" && needs_suggestions(key))) queue
       else (queue :+ (key, cmd, trigger)).takeRight(pending_max))
 
   private val consumer =
@@ -137,15 +187,19 @@ class PIDE_MCP_Auto_Inspector(session: PIDE_MCP_Session) {
         val now = Time.now()
         for {
           cmd <- changed.commands.iterator
-          if step_commands(cmd.span.name) && cmd.node_name.is_theory && !session.is_base_session_theory(cmd.node_name)
+          if (step_commands(cmd.span.name) || fail_commands(cmd.span.name)) && cmd.node_name.is_theory &&
+            !session.is_base_session_theory(cmd.node_name)
           node_snapshot = snapshot.switch(cmd.node_name)
           key <- PIDE_MCP_Auto_Inspect.key(node_snapshot, cmd)
         } {
           val status = PIDE_MCP_Command.status(node_snapshot, cmd)
-          if (status.is_running) running.change(m => if (m.contains(key)) m else m + (key -> (cmd, now)))
+          if (status.is_running) {
+            if (step_commands(cmd.span.name)) running.change(m => if (m.contains(key)) m else m + (key -> (cmd, now)))
+          }
           else {
             running.change(_ - key)
-            if (status.is_failed && PIDE_MCP_Command.Running_Clock.canceled_ms(node_snapshot, cmd).isEmpty)
+            if (fail_commands(cmd.span.name) && status.is_failed &&
+                PIDE_MCP_Command.Running_Clock.canceled_ms(node_snapshot, cmd).isEmpty)
               enqueue(key, cmd, "failed")
           }
         }
@@ -161,18 +215,78 @@ class PIDE_MCP_Auto_Inspector(session: PIDE_MCP_Session) {
       PIDE_MCP_Command.Running_Clock.canceled_ms(snapshot, cmd).isEmpty
   }
 
+  // follow-on failures (an earlier command of the same proof failed) are not probed: they would repeat its result
+  private val skipped = Synchronized(Set.empty[Key])
+
+  private def kind(snapshot: Document.Snapshot, cmd: Command): Option[String] =
+    snapshot.node.syntax.flatMap(_.keywords.kinds.get(cmd.span.name))
+
+  // what to replay for a command, and at which command (the state after it is the goal): None = nothing to replay
+  private def plan(snapshot: Document.Snapshot, cmd: Command, before: List[Command]): Option[(String, Command, String)] = {
+    def at_prev(m: String, note: String = "") = before.lastOption.map(prev => (m, prev, note))
+    val ms = methods(cmd.source)
+    cmd.span.name match {
+      case "apply" | "proof" | "qed" => ms.headOption.flatMap(at_prev(_))
+      case "by" => ms match {
+        case List(m1, m2) => at_prev(s"($m1, $m2)")
+        case m :: _ => at_prev(m)
+        case Nil => None
+      }
+      case "." => at_prev("this")
+      case ".." => at_prev("standard")
+      case "done" =>  // no method of its own: the last `apply` of the proof, on the goal it got
+        val proof = before.reverse.takeWhile(c => !kind(snapshot, c).exists(k => Keyword.theory_goal(k) || Keyword.proof_goal(k)))
+        proof.find(_.span.name == "apply").flatMap { apply =>
+          val i = before.lastIndexOf(apply)
+          for (m <- method_text(apply.source); prev <- before.take(i).lastOption)
+          yield (m, prev, s"the last `apply` before it, line ${line_of(snapshot, apply)}")
+        }
+      case _ => None
+    }
+  }
+
+  private def line_of(snapshot: Document.Snapshot, cmd: Command): Int =
+    snapshot.node.command_start(cmd).fold(0)(o => Line.Document(snapshot.node.source).position(o).line1)
+
+  private def query(cmd: Command, at: Command, operation: String, args: List[String], key: Key): Option[PIDE_MCP_Query.Result] = {
+    val snapshot = session.node_snapshot(cmd.node_name)
+    snapshot.node.command_start(at).flatMap { offset =>
+      val res = new PIDE_MCP_Query(session, PIDE_MCP_Editor.Context(cmd.node_name, offset), operation, new Progress)
+        .run(args, Some(Time.seconds(method_timeout + 20)), _ => !valid(key, cmd))
+      Option.when(res.outcome == PIDE_MCP_Query.Outcome.finished && valid(key, cmd))(res)
+    }
+  }
+
   private def probe(key: Key, cmd: Command, trigger: String): Unit = {
     val snapshot = session.node_snapshot(cmd.node_name)
-    val method = method_text(cmd.source)
-    // the goal of the step: the state after the command before it
-    val before = snapshot.node.commands.iterator.takeWhile(_ != cmd).filterNot(_.is_ignored).toList.lastOption
-    for (m <- method; prev <- before; offset <- snapshot.node.command_start(prev) if start(key)) {
+    val failed = trigger == "failed"
+    val before = snapshot.node.commands.iterator.takeWhile(_ != cmd).filterNot(_.is_ignored).toList
+    val proof = before.reverse.takeWhile(c => !kind(snapshot, c).exists(k => Keyword.theory_goal(k) || Keyword.proof_goal(k)))
+    val follow_on = failed && proof.exists(c => PIDE_MCP_Command.status(snapshot, c).is_failed)
+    if (follow_on) skipped.change(s => (s + key).takeRight(results_keep))
+    else if (failed && before.nonEmpty && needs_suggestions(key)) {
+      if (suggest_ready)
+        add_suggestions(key,
+          query(cmd, before.last, Tool_Suggest_Facts.operation, List(suggest_max.toString, "true"), key).toList
+            .flatMap(res => split_lines(res.text).filter(_.startsWith("  ")).map(_.trim)), session.id)
+    }
+    else if (before.nonEmpty && start(key)) {
       val result = Exn.result {
-        val query = new PIDE_MCP_Query(session, PIDE_MCP_Editor.Context(cmd.node_name, offset), operation, new Progress)
-        val res = query.run(List(m, method_timeout.toString, trace_max.toString),
-          Some(Time.seconds(method_timeout + 20)), _ => !valid(key, cmd))
-        Option.when(res.outcome == PIDE_MCP_Query.Outcome.finished && valid(key, cmd))(
-          parse(trigger, res.text, session.id).copy(elapsed = res.elapsed))
+        val steps = plan(snapshot, cmd, before)
+        val trace = steps.flatMap { case (m, at, _) =>
+          query(cmd, at, operation, List(m, method_timeout.toString, trace_max.toString), key) }
+        // the failing goal: the state after the command before the failed one (for `done`: the leftover subgoals)
+        val suggestions =
+          if (!failed || !suggest_ready) Nil
+          else query(cmd, before.last, Tool_Suggest_Facts.operation, List(suggest_max.toString, "true"), key).toList
+            .flatMap(res => split_lines(res.text).filter(_.startsWith("  ")).map(_.trim))
+        val note = steps.map(_._3).filter(_.nonEmpty)
+        Option.when(valid(key, cmd) && (trace.nonEmpty || suggestions.nonEmpty)) {
+          val trigger1 = trigger + (if (failed && cmd.span.name != "apply") s" `${cmd.span.name}`" else "") +
+            note.fold("")(n => s"; replayed $n")
+          parse(trigger1, trace.fold("")(_.text), session.id, suggestions)
+            .copy(elapsed = trace.fold(Time.zero)(_.elapsed), method = steps.map(_._1))
+        }
       }
       finish(key, result match { case Exn.Res(r) => r; case Exn.Exn(_) => None })
     }
@@ -186,6 +300,10 @@ class PIDE_MCP_Auto_Inspector(session: PIDE_MCP_Session) {
         case Exn.Res(_) => true
         case Exn.Exn(_) => false
       }
+      suggest_ready = ready && (Exn.result(Tool_Suggest_Facts.ensure_helper(session, new Progress)) match {
+        case Exn.Res(_) => true
+        case Exn.Exn(_) => false
+      })
       while (active && ready) {
         val now = Time.now()
         for ((key, (cmd, since)) <- running.value if now - since >= after) {
