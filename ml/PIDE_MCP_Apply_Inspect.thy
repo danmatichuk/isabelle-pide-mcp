@@ -107,8 +107,8 @@ fun report [method_arg, criteria_arg, max_uses_arg, timeout_arg, statements_arg]
 
 (*trace for the automatic inspection of a slow or failed step: every use is counted (every_use), in order.
   args: method, timeout in seconds, maximum number of trace lines.
-  Output: the outcome, loop warnings, "counts:" with one "  N name" line per theorem (most used first, with the
-  declarations of the first use), "trace:" with one "  source: name" line per use in order.*)
+  Output: the outcome, loop warnings, "counts:" with one "  N name<TAB>full name" line per theorem (most used first,
+  with the declarations of the first use), "trace:" with one "  source: name" line per use in order.*)
 fun use_key (Apply_Inspect.Theorem (name, _)) = Thm_Name.print name
   | use_key (Apply_Inspect.Fact name) = Thm_Name.print name
   | use_key (Apply_Inspect.Assumption (name, _)) =
@@ -171,7 +171,8 @@ fun trace [method_arg, timeout_arg, trace_max_arg] state =
           (outcome :: distinct (op =) (rev (Synchronized.value loops)) @
             ["counts:"] @
             map (fn (n, key, u) =>
-              "  " ^ string_of_int n ^ " " ^ (if key = "(other rule)" then key else plain (pretty_use u))) sorted @
+              "  " ^ string_of_int n ^ " " ^ (if key = "(other rule)" then key else plain (pretty_use u)) ^
+                "\t" ^ key) sorted @
             ["trace:"] @ map (fn s => "  " ^ s) (rev trace_lines) @
             (if n_trace > trace_max then ["  ... (" ^ string_of_int (n_trace - trace_max) ^ " more uses)"] else []))
       end

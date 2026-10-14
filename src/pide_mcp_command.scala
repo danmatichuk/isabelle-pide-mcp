@@ -507,7 +507,10 @@ object PIDE_MCP_Command {
 
     // the command failed only because the proof before it was left open ("Bad context for command ... using reset state")
     // the automatic inspection of a slow or failed step (pide_mcp_auto_inspect)
-    lazy val inspection: Option[JSON.Object.T] = PIDE_MCP_Auto_Inspect.json(snapshot, cmd)
+    lazy val inspection: Option[JSON.Object.T] =
+      PIDE_MCP_Auto_Inspect.json(snapshot, cmd,
+        Option.when(cmd_status.is_finished && !cmd_status.is_failed)(
+          if (timing_ms > 0) timing_ms else Running_Clock.stopped_ago(snapshot, cmd).fold(0L)(_._2.ms)))
 
     // a theory-level command (`lemma`, `definition`, ...), not a command inside a proof
     lazy val kind: Option[String] = snapshot.node.syntax.flatMap(_.keywords.kinds.get(cmd.span.name))

@@ -130,6 +130,7 @@ object PIDE_MCP_Render {
       val suggested = str_list(i.getOrElse("suggested_facts", Nil))
       head :: str_list(i.getOrElse("loops", Nil)).take(1) :::
         Option.when(top.nonEmpty)("top rules: " + top.mkString(", ")).toList :::
+        i.get("dominant_rule").map(scalar).toList :::
         Option.when(suggested.nonEmpty)("suggested facts: " + suggested.mkString(", ")).toList :::
         log.toList
     }

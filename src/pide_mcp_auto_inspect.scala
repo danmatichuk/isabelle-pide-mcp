@@ -34,15 +34,35 @@ object PIDE_MCP_Auto_Inspect {
     log: Option[String],
     elapsed: Time = Time.zero,
     method: Option[String] = None,
-    suggested: List[String] = Nil
+    suggested: List[String] = Nil,
+    dominant: Option[String] = None
   ) {
-    def json: JSON.Object.T =
+    // finished_ms: the real step has finished OK after so long (it was only slow, not looping)
+    def json(finished_ms: Option[Long] = None): JSON.Object.T = {
+      val outcome1 =
+        finished_ms match {
+          case Some(ms) if outcome.startsWith("did not finish") =>
+            s"slow: the step finished OK" + (if (ms > 0) s" in ${ms / 1000} s" else "") +
+              "; the probe stopped at its time limit"
+          case _ => outcome
+        }
       JSON_Object("trigger" -> trigger, "uses" -> uses, "probe_seconds" -> (elapsed.ms / 100).toDouble / 10) ++
         JSON.optional("method" -> method) ++
-        JSON_Object.if_proper(outcome.nonEmpty, JSON_Object("outcome" -> outcome, "top_rules" -> top)) ++
+        JSON_Object.if_proper(outcome.nonEmpty, JSON_Object("outcome" -> outcome1, "top_rules" -> top)) ++
+        JSON.optional("dominant_rule" -> dominant) ++
         JSON_Object.if_proper(loops.nonEmpty, JSON_Object("loops" -> loops)) ++
         JSON_Object.if_proper(suggested.nonEmpty, JSON_Object("suggested_facts" -> suggested)) ++
         JSON.optional("log" -> log)
+    }
+  }
+
+  /* infrastructure rules: of Pure or the theory HOL itself, class relations and arities (`*.super`, `arity_*`,
+     `classrel_*`), unnamed rules: counted, but not shown as top rules */
+  def infrastructure(key: String): Boolean = {
+    val names = Long_Name.explode(key)
+    val base = names.lastOption.getOrElse("")
+    key.startsWith("(") || names.headOption.exists(Set("Pure", "HOL")) ||
+      names.exists(n => n == "super" || n.startsWith("super(")) || base.startsWith("arity_") || base.startsWith("classrel_")
   }
 
   // results by evaluation: an edited (re-evaluated) command has a new key; None: the probe is running
@@ -75,10 +95,10 @@ object PIDE_MCP_Auto_Inspect {
       })
     }
 
-  def json(snapshot: Document.Snapshot, cmd: Command): Option[JSON.Object.T] =
+  def json(snapshot: Document.Snapshot, cmd: Command, finished_ms: Option[Long] = None): Option[JSON.Object.T] =
     get(snapshot, cmd).map {
       case None => JSON_Object("status" -> "running")
-      case Some(result) => result.json
+      case Some(result) => result.json(finished_ms)
     }
 
   private[mcp] def start(key: Key): Boolean =
@@ -132,12 +152,23 @@ object PIDE_MCP_Auto_Inspect {
     val lines = split_lines(text)
     val (head, rest) = lines.span(_ != "counts:")
     val (counts, trace) = rest.drop(1).span(_ != "trace:")
-    val count_lines = counts.filter(_.startsWith("  ")).map(_.trim)
-    val top = count_lines.take(top_rules).map { l =>
-      val (n, name) = l.span(_ != ' ')
-      s"${name.trim} ×$n"
+    // "N display<TAB>full name"
+    val entries = counts.filter(_.startsWith("  ")).map(_.trim).flatMap { l =>
+      val (n, rest) = l.span(_ != ' ')
+      val (display, key) = rest.trim.span(_ != '\t')
+      n.toIntOption.map(k => (k, display.trim, key.trim))
     }
-    val uses = count_lines.flatMap(_.takeWhile(_ != ' ').toIntOption).sum
+    val count_lines = entries.map { case (n, display, key) => s"$n $display" + (if (infrastructure(key)) "  (infrastructure)" else "") }
+    val proper = entries.filterNot(e => infrastructure(e._3))
+    val top = proper.take(top_rules).map { case (n, display, _) => s"$display ×$n" }
+    val uses = entries.map(_._1).sum
+    val proper_uses = proper.map(_._1).sum
+    // one rule doing most of the work: a rewrite or step repeated on many instances
+    val dominant = proper match {
+      case (n1, display, _) :: rest if n1 >= 10 && (2 * n1 >= proper_uses || rest.headOption.forall(n1 >= 3 * _._1)) =>
+        Some(s"most uses: `$display` ×$n1 (of $proper_uses non-infrastructure uses): consider a more direct rule for its instances")
+      case _ => None
+    }
     val inspected = text.nonEmpty
     val suggested_lines =
       if (suggestions.isEmpty) Nil
@@ -155,7 +186,7 @@ object PIDE_MCP_Auto_Inspect {
     }).flatten
     Result(trigger, if (!inspected) "" else head.headOption.getOrElse("no result").stripPrefix("error: "),
       head.drop(1).filter(_.startsWith("***")), top, uses, log,
-      suggested = suggestions.take(suggest_shown).map(s => s.takeWhile(_ != ':').trim))
+      suggested = suggestions.take(suggest_shown).map(s => s.takeWhile(_ != ':').trim), dominant = dominant)
   }
 }
 
