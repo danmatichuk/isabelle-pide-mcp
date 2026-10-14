@@ -30,6 +30,9 @@ option pide_mcp_auto_inspect : bool = true for pide_mcp
 option pide_mcp_auto_inspect_after : real = 5.0 for pide_mcp
   -- "inspect an apply/by step that is still running after this many seconds (failed steps at once)"
 
+option pide_mcp_auto_inspect_facts : bool = false for pide_mcp
+  -- "auto-inspect also lists possibly relevant facts (Sledgehammer's relevance filter) for a failing goal"
+
 option pide_mcp_auto_inspect_timeout : int = 5 for pide_mcp
   -- "method timeout of an automatic inspection (seconds)"
 

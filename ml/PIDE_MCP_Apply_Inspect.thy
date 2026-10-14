@@ -108,7 +108,7 @@ fun report [method_arg, criteria_arg, max_uses_arg, timeout_arg, statements_arg]
 
 (*trace for the automatic inspection of a slow or failed step: every use is counted (every_use), in order.
   args: method, timeout in seconds, maximum number of trace lines, and for a terminal step (by, done, qed, ...) the
-  maximum number of suggested facts and its methods (`by m1 m2`: m1, m2; otherwise one).
+  maximum number of suggested facts (0: none) and its methods (`by m1 m2`: m1, m2; otherwise one).
   Output: the outcome, loop warnings, for a terminal step "scenario: N" (by the real methods, not instrumented: 1 the
   first method fails, 2 the second method fails, 3 the methods apply but the finishing step of the terminal proof
   leaves "subgoals left: N"), "counts:" with one "  N name<TAB>full name" line per theorem (most used first, with the
@@ -209,7 +209,7 @@ fun trace (method_arg :: timeout_arg :: trace_max_arg :: terminal_args) state =
           | Exn.Res NONE => SOME NONE
           | Exn.Exn exn => if Exn.is_interrupt exn then Exn.reraise exn else NONE);
         val scenario =
-          if suggest_max <= 0 then NONE
+          if null terminal_args then NONE
           else
             let
               val (m1, m2) =
@@ -226,7 +226,7 @@ fun trace (method_arg :: timeout_arg :: trace_max_arg :: terminal_args) state =
             end;
         val scenario_facts =
           (case scenario of
-            SOME (_, st) => the_default [] (try (PIDE_MCP_Suggest.suggest' false suggest_max true) st)
+            SOME (_, st) => if suggest_max <= 0 then [] else the_default [] (try (PIDE_MCP_Suggest.suggest' false suggest_max true) st)
           | NONE => []);
         val scenario_goal =
           (case scenario of

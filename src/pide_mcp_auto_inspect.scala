@@ -291,6 +291,8 @@ class PIDE_MCP_Auto_Inspector(session: PIDE_MCP_Session) {
 
   private val after: Time = Time.seconds(session.options.real("pide_mcp_auto_inspect_after"))
   private val method_timeout: Int = session.options.int("pide_mcp_auto_inspect_timeout")
+  // possibly relevant facts for a failing goal (pide_mcp_auto_inspect_facts, default off)
+  private val facts: Boolean = session.options.bool("pide_mcp_auto_inspect_facts")
 
   @volatile private var active = true
   @volatile private var ready = false  // helper theory loaded
@@ -414,7 +416,7 @@ class PIDE_MCP_Auto_Inspector(session: PIDE_MCP_Session) {
         val trace = steps.flatMap { case (m, at, _, ms) =>
           query(cmd, at, operation,
             List(m, method_timeout.toString, trace_max.toString) :::
-              (if (terminal && ms.nonEmpty) suggest_max.toString :: ms else Nil), key) }
+              (if (terminal && ms.nonEmpty) (if (suggest_ready) suggest_max else 0).toString :: ms else Nil), key) }
         // the trace has the suggestions for the goal of the scenario
         val left = trace.exists(res => split_lines(res.text).contains("suggested:"))
         // the failing goal: the state after the command before the failed one
@@ -443,7 +445,7 @@ class PIDE_MCP_Auto_Inspector(session: PIDE_MCP_Session) {
         case Exn.Res(_) => true
         case Exn.Exn(_) => false
       }
-      suggest_ready = ready && (Exn.result(Tool_Suggest_Facts.ensure_helper(session, new Progress)) match {
+      suggest_ready = ready && facts && (Exn.result(Tool_Suggest_Facts.ensure_helper(session, new Progress)) match {
         case Exn.Res(_) => true
         case Exn.Exn(_) => false
       })
