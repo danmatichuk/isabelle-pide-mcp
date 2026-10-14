@@ -239,9 +239,13 @@ object PIDE_MCP_Render {
       "(missing class on a type variable, unknown identifier = free variable, open proof, looping simp)",
       "hint: failing proof: `try0`, then `sledgehammer [timeout = 10]`, before another method (full hint: the first failure of this server run)"))
     val message_hint_lines = message_hints(JSON.Format(json)).map("hint: " + _)
+    // once per server run: agents skip loading the proof skill despite the instructions
+    val proving = count("commands_bad") + count("commands_failed") > 0 || state.contains("open_proof")
+    val skill_hint = Option.when(proving)(PIDE_MCP_Hints.once("proof_skill",
+      "hint: proving? Load the isabelle-proof-development skill if you have not (shown once)", "")).filter(_.nonEmpty)
     val main_lines = header :: provisional.getOrElse(Nil) ::: note_lines ::: waiting_line.toList ::: synced ::: first.getOrElse(Nil) :::
       dedupe_blocks(section("problems", "problems") ::: section("commands", "commands"))
-    val hint_lines = hint.toList ::: message_hint_lines
+    val hint_lines = hint.toList ::: message_hint_lines ::: skill_hint.toList
     val long_output_lines = 150
     if (max_lines > 0 && main_lines.length > max_lines)  // hard cap: keep the start, say what was cut
       cat_lines(main_lines.take(max_lines) :::
