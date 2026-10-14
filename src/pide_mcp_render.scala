@@ -235,9 +235,11 @@ object PIDE_MCP_Render {
       "`Failed to finish proof` shows the state where the proof got stuck, after its methods ran. " +
       "Commands after a failed command of the same proof run on the state before it: their `finished` is no evidence. " +
       "A failed or sorry'd LEMMA is still usable by later commands, which then also show `finished`: everything after the first problem may rest on it. " +
+      "`apply_inspect` with the failing method lists the rules it tried. " +
       "If a method fails without a reason, see \"Basic idioms and traps\" in the isabelle-proof-development skill " +
       "(missing class on a type variable, unknown identifier = free variable, open proof, looping simp)",
-      "hint: failing proof: `try0`, then `sledgehammer [timeout = 10]`, before another method (full hint: the first failure of this server run)"))
+      "hint: failing proof: `try0`, then `sledgehammer [timeout = 10]`, before another method; `apply_inspect` shows what a method tried " +
+        "(full hint: the first failure of this server run)"))
     val message_hint_lines = message_hints(JSON.Format(json)).map("hint: " + _)
     // once per server run: agents skip loading the proof skill despite the instructions
     val proving = count("commands_bad") + count("commands_failed") > 0 || state.contains("open_proof")
@@ -245,7 +247,11 @@ object PIDE_MCP_Render {
       "hint: proving? Load the isabelle-proof-development skill if you have not (shown once)", "")).filter(_.nonEmpty)
     val main_lines = header :: provisional.getOrElse(Nil) ::: note_lines ::: waiting_line.toList ::: synced ::: first.getOrElse(Nil) :::
       dedupe_blocks(section("problems", "problems") ::: section("commands", "commands"))
-    val hint_lines = hint.toList ::: message_hint_lines ::: skill_hint.toList
+    // the moment to inspect a method: it keeps running (loop?) or failed without saying what it tried
+    val inspect_hint = Option.when(count("commands_still_running_possibly_nonterminating") > 0)(
+      "hint: to see whether a running method loops and which rules it uses: `apply_inspect` with that method, " +
+        "`start_line` = the line before it, `method_timeout: 5`")
+    val hint_lines = hint.toList ::: inspect_hint.toList ::: message_hint_lines ::: skill_hint.toList
     val long_output_lines = 150
     if (max_lines > 0 && main_lines.length > max_lines)  // hard cap: keep the start, say what was cut
       cat_lines(main_lines.take(max_lines) :::
