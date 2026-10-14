@@ -219,7 +219,14 @@ object PIDE_MCP_Auto_Inspect {
       val (key, flag) = key_flag.drop(1).span(_ != '\t')
       n.toIntOption.map(k => (k, display.trim, key.trim, flag.trim.nonEmpty || infrastructure(key.trim)))
     }
-    val count_lines = entries.map { case (n, display, _, infra) => s"$n $display" + (if (infra) "  (infrastructure)" else "") }
+    // the non-infrastructure theorems first (most used first), then the infrastructure ones under their own header
+    val count_lines = {
+      val (infra, proper) = entries.partition(_._4)
+      proper.map { case (n, display, _, _) => s"$n $display" } :::
+        (if (infra.isEmpty) Nil
+         else "infrastructure (Pure/HOL, class/sort rules; not shown in top rules):" ::
+          infra.map { case (n, display, _, _) => s"  $n $display" })
+    }
     val proper = entries.filterNot(_._4)
     val top = proper.take(top_rules).map { case (n, display, _, _) => s"$display ×$n" }
     val uses = entries.map(_._1).sum
