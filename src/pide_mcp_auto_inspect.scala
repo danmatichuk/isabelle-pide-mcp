@@ -5,7 +5,7 @@ pide_mcp_auto_inspect_after seconds, or of any proof command that fails (`apply`
 `..`; for `done` the last `apply` before it), is run again in the background by the apply_inspect
 instrumentation on the same goal (the state after the command before it). For a failure, Sledgehammer's
 relevance filter also suggests facts for that goal. get_state shows the most used rules, loop warnings,
-suggested facts and a log file with every use in order and all suggestions.
+possibly relevant facts and a log file with every use in order and all of them.
 */
 
 package isabelle.pide.mcp
@@ -99,7 +99,7 @@ object PIDE_MCP_Auto_Inspect {
   private[mcp] def add_suggestions(key: Key, suggestions: List[String], session_id: String): Unit =
     if (suggestions.nonEmpty) {
       val log = Exn.result(Tool_Apply_Inspect.write_file(session_id,
-        cat_lines("suggested facts (Sledgehammer's relevance filter, most relevant first):" :: suggestions.map("  " + _)) + "\n",
+        cat_lines("possibly relevant facts (Sledgehammer's relevance filter, most relevant first):" :: suggestions.map("  " + _)) + "\n",
         prefix = "auto_suggest")) match { case Exn.Res(p) => Some(p); case Exn.Exn(_) => None }
       results.change(map => map.get(key) match {
         case Some(Some(r)) =>
@@ -200,7 +200,7 @@ object PIDE_MCP_Auto_Inspect {
       s" for the $n subgoal${if (n == 1) "" else "s"} left")
     val suggested_lines =
       if (suggestions.isEmpty) Nil
-      else (s"suggested facts$left_note (Sledgehammer's relevance filter, most relevant first):" :: suggestions.map("  " + _))
+      else (s"possibly relevant facts$left_note (Sledgehammer's relevance filter, most relevant first):" :: suggestions.map("  " + _))
     val log = Option.when(count_lines.nonEmpty || suggestions.nonEmpty)(Exn.result(Tool_Apply_Inspect.write_file(session_id,
       cat_lines(List(s"trigger: $trigger") :::
         (if (!inspected) Nil
