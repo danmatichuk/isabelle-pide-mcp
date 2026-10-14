@@ -22,6 +22,11 @@ Proof search, automation and concept search in Isabelle. Make sure the PIDE MCP 
 
 When automation is brittle or explodes, switch to a structured Isar proof with intermediate steps.
 
+## How Long a Method May Take
+
+- **Most methods take well under a second, a few about a second.** 5 s is rarely expected; 10 s is acceptable only if the faster alternative needs more than a few lines of proof text.
+- **At 30 s something has almost certainly gone wrong: restructure** (smaller steps, intermediate lemmas, fewer unfoldings) instead of accepting it, also when the step finishes. A VCG (`runs_to_vcg`-style methods) is the rare method that may take longer, but 30 s is still very suspicious.
+
 ## Searching Theorems and Constants
 
 - **Use the `find_theorems` / `find_consts` tools, not grep, for imported theories:** they are cheap, match by pattern and give exact statements. Unsure of a name? Search part of it: `name: rev`.
