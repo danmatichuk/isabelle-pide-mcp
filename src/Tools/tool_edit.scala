@@ -305,7 +305,7 @@ class Tool_Edit extends PIDE_MCP_Tool("edit") {
           echoes += all.length - results.length
           // (a message is cut at 2000 characters too: a long value can sit on one line)
           def cut(m: String): String = if (m.length <= 2000) m else m.take(2000) + s"... (+${m.length - 2000} characters)"
-          val entries = PIDE_MCP_Command.message_entries(results.iterator, kinds, Some(40)).flatten.map {
+          val entries = PIDE_MCP_Command.message_entries(results.iterator, kinds, Some(40), goal_max_lines = Some(40)).flatten.map {
             case (k, l: List[_]) => (k, l.map(m => cut(m.toString)))
             case e => e
           }

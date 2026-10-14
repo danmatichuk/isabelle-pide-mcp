@@ -198,7 +198,9 @@ object PIDE_MCP_Command {
       // datatype and similar commands print one `consts` block per generated constant (typerep_, random_, ...)
       val shown = if (kind == "writeln" && max_lines.nonEmpty) collapse_consts(messages) else messages
       kind -> (
-        if (kind == "goal" && goal_max_lines.nonEmpty) shown.map(cap_goal(_, goal_max_lines.get))
+        // errors embed goals too (`Failed to apply proof method`, `Failed to finish proof`): capped in the same way
+        if (goal_max_lines.nonEmpty && (kind == "goal" || kind == "error" || kind == "warning"))
+          shown.map(cap_goal(_, goal_max_lines.get, if (kind == "goal") "goal" else kind))
         else max_lines.fold(shown)(n => shown.map(truncate_lines(_, n))))
     })
   }
@@ -208,7 +210,7 @@ object PIDE_MCP_Command {
   val goal_size_note_lines: Int = 30
   val goal_warning_lines: Int = 200
 
-  def cap_goal(text: String, max_lines: Int): String = {
+  def cap_goal(text: String, max_lines: Int, label: String = "goal"): String = {
     val lines = text.linesIterator.toList
     val n = lines.length
     val chars = text.length
@@ -216,7 +218,7 @@ object PIDE_MCP_Command {
     val large = n >= goal_warning_lines || chars >= goal_warning_lines * 200
     val header =
       Option.when(n >= goal_size_note_lines || large)(
-        s"(goal: $n lines, $chars characters" +
+        s"($label: $n lines, $chars characters" +
           (if (large) "; VERY LARGE: the method probably blew the term up, try a more targeted method" else "") + ")")
     val cut =
       if (max_lines <= 0 || n <= max_lines && chars <= max_chars) text
