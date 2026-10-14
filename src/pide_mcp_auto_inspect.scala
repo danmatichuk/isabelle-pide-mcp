@@ -16,6 +16,7 @@ object PIDE_MCP_Auto_Inspect {
   val operation: String = "pide_mcp_apply_trace"
   val step_commands: Set[String] = Set("apply", "by")  // probed when they run long
   val fail_commands: Set[String] = Set("apply", "by", "done", "qed", "proof", ".", "..")  // probed when they fail
+  val terminal_commands: Set[String] = Set("by", "done", "qed", ".", "..")  // fail when goals are left
   val suggest_max: Int = 20
   val suggest_shown: Int = 5
   val top_rules: Int = 5
@@ -35,8 +36,13 @@ object PIDE_MCP_Auto_Inspect {
     elapsed: Time = Time.zero,
     method: Option[String] = None,
     suggested: List[String] = Nil,
-    dominant: Option[String] = None
+    dominant: Option[String] = None,
+    subgoals_left: Option[Int] = None  // a terminal step: the goals left after its (successful) method
   ) {
+    // the suggestions are for the goal left by the method, not for the goal before it
+    def suggested_for: Option[String] =
+      subgoals_left.filter(_ > 0).map(n => s"the $n subgoal${if (n == 1) "" else "s"} left")
+
     // finished_ms: the real step has finished OK after so long (it was only slow, not looping)
     def json(finished_ms: Option[Long] = None): JSON.Object.T = {
       val outcome1 =
@@ -50,8 +56,10 @@ object PIDE_MCP_Auto_Inspect {
         JSON.optional("method" -> method) ++
         JSON_Object.if_proper(outcome.nonEmpty, JSON_Object("outcome" -> outcome1, "top_rules" -> top)) ++
         JSON.optional("dominant_rule" -> dominant) ++
+        JSON.optional("subgoals_left" -> subgoals_left) ++
         JSON_Object.if_proper(loops.nonEmpty, JSON_Object("loops" -> loops)) ++
         JSON_Object.if_proper(suggested.nonEmpty, JSON_Object("suggested_facts" -> suggested)) ++
+        JSON.optional("suggested_for" -> suggested_for.filter(_ => suggested.nonEmpty)) ++
         JSON.optional("log" -> log)
     }
   }
@@ -148,11 +156,17 @@ object PIDE_MCP_Auto_Inspect {
     else Some(rest.takeWhile(c => !c.isWhitespace)).filter(_.nonEmpty)
   }
 
-  // the text of the trace operation: outcome, loop lines, "counts:" lines, "trace:" lines
-  def parse(trigger: String, text: String, session_id: String, suggestions: List[String] = Nil): Result = {
+  /* the text of the trace operation: outcome, loop lines, "subgoals left: N", "counts:" lines, "trace:" lines,
+     "suggested:" lines (for the goal left); suggestions: for the goal before the step, used if there are none for
+     the goal left */
+  def parse(trigger: String, text: String, session_id: String, suggestions0: List[String] = Nil): Result = {
     val lines = split_lines(text)
     val (head, rest) = lines.span(_ != "counts:")
-    val (counts, trace) = rest.drop(1).span(_ != "trace:")
+    val (counts, rest1) = rest.drop(1).span(_ != "trace:")
+    val (trace, suggested_left) = rest1.span(_ != "suggested:")
+    val subgoals_left = head.collectFirst { case l if l.startsWith("subgoals left: ") => l.stripPrefix("subgoals left: ").trim.toIntOption }.flatten
+    val left_suggestions = suggested_left.drop(1).filter(_.startsWith("  ")).map(_.trim)
+    val suggestions = if (left_suggestions.nonEmpty) left_suggestions else suggestions0
     // "N display<TAB>full name"
     val entries = counts.filter(_.startsWith("  ")).map(_.trim).flatMap { l =>
       val (n, rest) = l.span(_ != ' ')
@@ -172,9 +186,11 @@ object PIDE_MCP_Auto_Inspect {
       case _ => None
     }
     val inspected = text.nonEmpty
+    val left_note = subgoals_left.filter(_ > 0 && left_suggestions.nonEmpty).fold("")(n =>
+      s" for the $n subgoal${if (n == 1) "" else "s"} left")
     val suggested_lines =
       if (suggestions.isEmpty) Nil
-      else ("suggested facts (Sledgehammer's relevance filter, most relevant first):" :: suggestions.map("  " + _))
+      else (s"suggested facts$left_note (Sledgehammer's relevance filter, most relevant first):" :: suggestions.map("  " + _))
     val log = Option.when(count_lines.nonEmpty || suggestions.nonEmpty)(Exn.result(Tool_Apply_Inspect.write_file(session_id,
       cat_lines(List(s"trigger: $trigger") :::
         (if (!inspected) Nil
@@ -186,9 +202,17 @@ object PIDE_MCP_Auto_Inspect {
       case Exn.Res(path) => Some(path)
       case Exn.Exn(_) => None
     }).flatten
-    Result(trigger, if (!inspected) "" else head.headOption.getOrElse("no result").stripPrefix("error: "),
+    val outcome0 = head.headOption.getOrElse("no result").stripPrefix("error: ")
+    val outcome =
+      subgoals_left match {
+        case Some(n) if n > 0 && outcome0 == "succeeds" =>
+          s"succeeds but does not finish the proof: $n subgoal${if (n == 1) "" else "s"} left"
+        case _ => outcome0
+      }
+    Result(trigger, if (!inspected) "" else outcome,
       head.drop(1).filter(_.startsWith("***")), top, uses, log,
-      suggested = suggestions.take(suggest_shown).map(s => s.takeWhile(_ != ':').trim), dominant = dominant)
+      suggested = suggestions.take(suggest_shown).map(s => s.takeWhile(_ != ':').trim), dominant = dominant,
+      subgoals_left = subgoals_left)
   }
 }
 
@@ -306,11 +330,15 @@ class PIDE_MCP_Auto_Inspector(session: PIDE_MCP_Session) {
     else if (before.nonEmpty && start(key)) {
       val result = Exn.result {
         val steps = plan(snapshot, cmd, before)
+        val terminal = terminal_commands(cmd.span.name)
         val trace = steps.flatMap { case (m, at, _) =>
-          query(cmd, at, operation, List(m, method_timeout.toString, trace_max.toString), key) }
-        // the failing goal: the state after the command before the failed one (for `done`: the leftover subgoals)
+          query(cmd, at, operation,
+            List(m, method_timeout.toString, trace_max.toString) ::: (if (terminal) List(suggest_max.toString) else Nil), key) }
+        // a terminal step whose method succeeds: the trace has the suggestions for the goal left
+        val left = trace.exists(res => split_lines(res.text).contains("suggested:"))
+        // the failing goal: the state after the command before the failed one
         val suggestions =
-          if (!failed || !suggest_ready) Nil
+          if (!failed || !suggest_ready || left) Nil
           else query(cmd, before.last, Tool_Suggest_Facts.operation, List(suggest_max.toString, "true"), key).toList
             .flatMap(res => split_lines(res.text).filter(_.startsWith("  ")).map(_.trim))
         val note = steps.map(_._3).filter(_.nonEmpty)

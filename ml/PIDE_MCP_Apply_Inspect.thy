@@ -8,7 +8,7 @@ position, without changing the theory.
 *)
 
 theory PIDE_MCP_Apply_Inspect
-  imports "../deps/apply_inspect/Apply_Inspect"
+  imports "../deps/apply_inspect/Apply_Inspect" PIDE_MCP_Suggest
 begin
 
 ML \<open>
@@ -106,10 +106,13 @@ fun report [method_arg, criteria_arg, max_uses_arg, timeout_arg, statements_arg]
   | report _ _ = error "Bad arguments";
 
 (*trace for the automatic inspection of a slow or failed step: every use is counted (every_use), in order.
-  args: method, timeout in seconds, maximum number of trace lines.
-  Output: the outcome, loop warnings, "counts:" with one "  N name<TAB>full name" line per theorem (most used first,
+  args: method, timeout in seconds, maximum number of trace lines, and for a terminal step (by, done, qed, ...) the
+  maximum number of suggested facts.
+  Output: the outcome, loop warnings, for a terminal step whose method succeeds "subgoals left: N" (after the
+  finishing step of a terminal proof), "counts:" with one "  N name<TAB>full name" line per theorem (most used first,
   with the declarations of the first use; "<TAB>(infrastructure)" appended for sort membership rules), "trace:" with
-  one "  source: name" line per use in order.*)
+  one "  source: name" line per use in order, and when subgoals are left "suggested:" with the facts for the first
+  of them (lines as PIDE_MCP_Suggest.suggest).*)
 fun use_key (Apply_Inspect.Theorem (name, _)) = Thm_Name.print name
   | use_key (Apply_Inspect.Fact name) = Thm_Name.print name
   | use_key (Apply_Inspect.Assumption (name, _)) =
@@ -142,7 +145,7 @@ fun sort_rule ctxt =
       | NONE => false)
   end;
 
-fun trace [method_arg, timeout_arg, trace_max_arg] state =
+fun trace (method_arg :: timeout_arg :: trace_max_arg :: terminal_args) state =
       let
         val ctxt = Proof.context_of state;
         val pretty_use = Apply_Inspect.pretty_use ctxt;
@@ -189,6 +192,22 @@ fun trace [method_arg, timeout_arg, trace_max_arg] state =
               if Exn.is_interrupt_breakdown exn then "ran out of stack or memory (it may loop)"
               else Exn.reraise exn);
 
+        (*a terminal step whose method succeeds: the goal left after it and the finishing step, by the real method*)
+        val suggest_max = (case terminal_args of [n] => the_default 0 (Int.fromString n) | _ => 0);
+        val left =
+          if suggest_max <= 0 orelse outcome <> "succeeds" then NONE
+          else
+            (case Exn.capture (fn () => Timeout.apply timeout (fn () =>
+                Seq.pull (Seq.filter_results
+                  (Proof.apply (Method.finish_text (SOME text, true), Position.no_range) state))) ()) () of
+              Exn.Res (SOME (state', _)) =>
+                let val n = Thm.nprems_of (#goal (Proof.goal state')) in
+                  if n = 0 then SOME (0, [])
+                  else SOME (n, the_default [] (try (PIDE_MCP_Suggest.suggest suggest_max true) state'))
+                end
+            | Exn.Res NONE => NONE
+            | Exn.Exn exn => if Exn.is_interrupt exn then Exn.reraise exn else NONE);
+
         val sorted =
           Symtab.fold (fn (key, (n, u)) => cons (n, key, u)) (Synchronized.value counts) []
           |> sort (fn ((n1, k1, _), (n2, k2, _)) => prod_ord (rev_order o int_ord) string_ord ((n1, k1), (n2, k2)));
@@ -197,12 +216,14 @@ fun trace [method_arg, timeout_arg, trace_max_arg] state =
       in
         cat_lines
           (outcome :: distinct (op =) (rev (Synchronized.value loops)) @
+            (case left of SOME (n, _) => ["subgoals left: " ^ string_of_int n] | NONE => []) @
             ["counts:"] @
             map (fn (n, key, u) =>
               "  " ^ string_of_int n ^ " " ^ (if key = "(other rule)" then key else plain (pretty_use u)) ^
                 "\t" ^ key ^ (if is_sort_rule (key, u) then "\t(infrastructure)" else "")) sorted @
             ["trace:"] @ map (fn s => "  " ^ s) (rev trace_lines) @
-            (if n_trace > trace_max then ["  ... (" ^ string_of_int (n_trace - trace_max) ^ " more uses)"] else []))
+            (if n_trace > trace_max then ["  ... (" ^ string_of_int (n_trace - trace_max) ^ " more uses)"] else []) @
+            (case left of SOME (_, facts as _ :: _) => "suggested:" :: facts | _ => []))
       end
   | trace _ _ = error "Bad arguments";
 

@@ -10,7 +10,8 @@ theory PIDE_MCP_Suggest
 begin
 
 ML \<open>
-local
+structure PIDE_MCP_Suggest =
+struct
 
 fun fact_line ctxt with_statements (((name, _), thm): Sledgehammer_Fact.fact) =
   if with_statements then
@@ -23,7 +24,30 @@ fun fact_line ctxt with_statements (((name, _), thm): Sledgehammer_Fact.fact) =
     in "  " ^ name ^ ": " ^ stmt end
   else "  " ^ name;
 
-in
+(*the facts the relevance filter selects for subgoal 1 of the goal of a proof state: section lines and fact lines*)
+fun suggest max_facts with_statements state =
+  let
+    val ctxt = Proof.context_of state;
+    val params = Sledgehammer_Commands.default_params (Proof.theory_of state) [];
+    val fact_override = Sledgehammer_Fact.no_fact_override;
+    val {facts = chained_thms, goal, ...} = Proof.goal state;
+    val (_, hyp_ts, concl_t) = ATP_Util.strip_subgoal goal 1 ctxt;
+    val prover = hd (#provers params);
+    val all_facts =
+      Sledgehammer_Fact.nearly_all_facts_of_context ctxt false fact_override chained_thms
+        hyp_ts concl_t;
+    val factss =
+      Sledgehammer_MaSh.relevant_facts ctxt params prover max_facts fact_override
+        hyp_ts concl_t all_facts;
+    fun section (filter, facts) =
+      ("Selected " ^ string_of_int (length facts) ^ " " ^
+        (if filter = "" then "" else filter ^ " ") ^ "fact" ^
+        (if length facts = 1 then "" else "s") ^ " (most relevant first):") ::
+      map (fact_line ctxt with_statements) facts;
+  in
+    if forall (null o snd) factss then ["Found no relevant facts"]
+    else maps section factss
+  end;
 
 val _ =
   Query_Operation.register {name = "pide_mcp_suggest_facts", pri = Task_Queue.urgent_pri}
@@ -31,32 +55,10 @@ val _ =
       (case try Toplevel.proof_of st of
         NONE => error "No proof state at this position: use a line inside a proof with an open goal"
       | SOME state =>
-          let
-            val [max_facts_arg, statements_arg] = args;
-            val max_facts = the_default 20 (Int.fromString max_facts_arg);
-            val with_statements = statements_arg = "true";
-            val ctxt = Proof.context_of state;
-            val params = Sledgehammer_Commands.default_params (Proof.theory_of state) [];
-            val fact_override = Sledgehammer_Fact.no_fact_override;
-            val {facts = chained_thms, goal, ...} = Proof.goal state;
-            val (_, hyp_ts, concl_t) = ATP_Util.strip_subgoal goal 1 ctxt;
-            val prover = hd (#provers params);
-            val all_facts =
-              Sledgehammer_Fact.nearly_all_facts_of_context ctxt false fact_override chained_thms
-                hyp_ts concl_t;
-            val factss =
-              Sledgehammer_MaSh.relevant_facts ctxt params prover max_facts fact_override
-                hyp_ts concl_t all_facts;
-            fun section (filter, facts) =
-              ("Selected " ^ string_of_int (length facts) ^ " " ^
-                (if filter = "" then "" else filter ^ " ") ^ "fact" ^
-                (if length facts = 1 then "" else "s") ^ " (most relevant first):") ::
-              map (fact_line ctxt with_statements) facts;
+          let val [max_facts_arg, statements_arg] = args
           in
-            writeln_result
-              (cat_lines
-                (if forall (null o snd) factss then ["Found no relevant facts"]
-                 else maps section factss))
+            writeln_result (cat_lines
+              (suggest (the_default 20 (Int.fromString max_facts_arg)) (statements_arg = "true") state))
           end));
 
 end;
