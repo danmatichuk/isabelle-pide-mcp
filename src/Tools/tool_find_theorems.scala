@@ -45,15 +45,17 @@ object Tool_Find {
       snapshot, start_line_arg.get(args), prefix_arg.get(args))
     val result = new PIDE_MCP_Query(session, PIDE_MCP_Editor.Context(node_name, offset), operation, progress)
       .run(query_args, Some(Time.seconds(timeout_arg.get(args))))
-    val default_line = Option.when(start_line_arg.get(args).isEmpty)(
-      Line.Document(snapshot.node.source).position(offset).line1)
+    val line = Line.Document(snapshot.node.source).position(offset).line1
+    val default_line = Option.when(start_line_arg.get(args).isEmpty)(line)
+    // a pattern is read with the syntax at the position (e.g. the notation of included bundles): say where that was
+    val parse_failed =
+      List("Inner syntax error", "Inner lexical error", "Type unification failed", "Undefined constant").exists(result.text.contains)
     val note =
       (if (result.outcome == PIDE_MCP_Query.Outcome.timeout)
         "\n(query cancelled after the timeout: results may be incomplete)" else "") +
       default_line.fold("")(line => s"\n(searched at line $line, the default: end of file" +
         default_note.fold("")("; " + _) + "; pass start_line to search elsewhere)") +
-      (if (List("Inner syntax error", "Type unification failed", "Inner lexical error", "Undefined constant").exists(result.text.contains))
-        bundle_note(snapshot, offset).fold("")("\n" + _) else "") +
+      (if (parse_failed && default_line.isEmpty) s"\n(searched at line $line)" else "") +
       (if (result.text.contains("Unknown context"))
         "\n(Unknown context: the position has no theory context, e.g. it is after the theory's `end` or its command failed: " +
           "pass a start_line inside the theory, at a processed command)" else "")
@@ -67,50 +69,6 @@ object Tool_Find {
   }
 
   val format: PIDE_MCP_Tool_Arg[PIDE_MCP_Render.Output_Format] = format_arg
-
-  /* For a pattern that fails to parse or type-check: the syntax bundles of the file around the query position
-     (`context ... includes b begin ... end` blocks and `unbundle b`), as a query outside an `includes` context
-     reads its pattern without that notation. From the file text: Isabelle keeps no record of active bundles. */
-  private val includes_regex = """(?s)\bincludes\s+(.*?)\s*(?:\bbegin\b|\bfixes\b|\bassumes\b|\bfor\b|$)""".r
-  private val unbundle_regex = """(?s)^\s*unbundle\s+(.*?)\s*$""".r
-
-  def bundle_note(snapshot: Document.Snapshot, offset: Text.Offset): Option[String] = {
-    val doc = Line.Document(snapshot.node.source)
-    def line(o: Text.Offset): Int = doc.position(o).line1
-    def names(s: String): List[String] = s.split("\\s+").toList.filter(n => n.nonEmpty && n != "and")
-    val keywords = snapshot.node.syntax.map(_.keywords)
-    def is_block(cmd: Command): Boolean =
-      keywords.flatMap(_.kinds.get(cmd.span.name)).exists(Keyword.theory_block) && cmd.source.trim.endsWith("begin")
-    // (first line, last line, bundles) of the blocks and unbundle scopes
-    var stack = List.empty[(Int, List[String])]
-    var scopes = List.empty[(Int, Int, List[String])]
-    for ((cmd, start) <- snapshot.node.command_iterator() if !cmd.is_ignored) {
-      val src = cmd.source
-      if (is_block(cmd)) {
-        val bundles = if (cmd.span.name == "theory") Nil else includes_regex.findFirstMatchIn(src).toList.flatMap(m => names(m.group(1)))
-        stack = (line(start), bundles) :: stack
-      }
-      else if (cmd.span.name == "end" && stack.nonEmpty) {
-        val (from, bundles) = stack.head
-        stack = stack.tail
-        if (bundles.nonEmpty) scopes ::= (from, line(start), bundles)
-      }
-      else if (cmd.span.name == "unbundle")
-        unbundle_regex.findFirstMatchIn(src).foreach(m => stack match {
-          case (from, bundles) :: rest => stack = (from, bundles ::: names(m.group(1))) :: rest
-          case Nil =>
-        })
-    }
-    val here = line(offset)
-    val end_line = doc.lines.length
-    val all = (scopes ::: stack.map { case (from, bundles) => (from, end_line, bundles) }).filter(_._3.nonEmpty).sortBy(_._1)
-    Option.when(all.nonEmpty) {
-      val active = all.filter(s => s._1 <= here && here <= s._2).flatMap(_._3).distinct
-      s"(bundles active at line $here: " + (if (active.isEmpty) "none" else active.mkString(", ")) + "; the file's bundle contexts: " +
-        all.map { case (from, to, bundles) => s"`${bundles.mkString(" ")}` at lines $from-$to" }.mkString(", ") +
-        (if (active.isEmpty) ": a pattern that needs their notation must be searched at a line inside them (start_line)" else "") + ")"
-    }
-  }
 
   // A locale's facts are stated again for the locale's parameters (`class.foo ?plus ?minus ... ==> ...`, 20 schematic
   // parameters): where another result has the same last name component, they are left out and listed in one line.
