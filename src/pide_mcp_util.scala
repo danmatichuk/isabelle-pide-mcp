@@ -96,12 +96,29 @@ object PIDE_MCP_Util {
      Isabelle itself already qualifies a name that is ambiguous in the context (`Foo.map`, `list.map`), but a notation
      whose only token is a word (`notation my_map ("map")`, e.g. from an included bundle) prints exactly like the
      library's `map`: such a word is replaced by the constant's full name (`Foo.my_map`). Notation with symbols or
-     several tokens (`@`, `∀x.`, `if … then … else`, `THE x.`) prints as before. Modes: notation (default), outside_base
+     several tokens (`@`, `∀x.`, `if … then … else`, `THE x.`) prints as before. Also qualified: a constant printed by
+     its plain name that shadows a different constant of the same base name from the base sessions (a project's
+     `map` while List.map exists; within its own theory Isabelle prints it as plain `map`). Modes: notation (default), outside_base
      (also every constant of a theory outside the base sessions), all (every constant), none. Only the MCP's copy of
      the messages is rewritten (its markup), not the prover's printing: the user's editor is not affected. */
   object Qualify_Names {
     @volatile private var mode = "notation"  // notation | outside_base | all | none
     private val base_theories = Synchronized(Set.empty[String])  // base names of the theories of base sessions
+    // base name -> full names of the constants of the base sessions (loaded in the background after a session start)
+    private val base_consts = Synchronized(Map.empty[String, Set[String]])
+
+    def add_base_consts(names: List[String]): Unit =
+      base_consts.change(map => names.foldLeft(map) { (m, name) =>
+        val base = Long_Name.base_name(name)
+        m + (base -> (m.getOrElse(base, Set.empty) + name))
+      })
+
+    // a constant not of the base sessions printed by its plain base name, which a constant of the base sessions
+    // also has (`map` for a project's own map, while List.list.map exists); collisions among library constants
+    // (two `Suc`) are not shown
+    private def shadows(name: String, text: String): Boolean =
+      text == Long_Name.base_name(name) &&
+        base_consts.value.get(text).exists(names => !names.contains(name) && names.nonEmpty)
 
     def init(options: Options, base: Iterable[String]): Unit = {
       mode = options.string("pide_mcp_qualify_names")
@@ -150,7 +167,8 @@ object PIDE_MCP_Util {
             val text = XML.content(b)
             val (words, delims) = syntax.getOrElse(name, (Set.empty[String], false))
             val notation_word = words == Set(text) && !delims && is_word(text) && text != name
-            val plain_name = words.isEmpty && !delims && text != name && name.endsWith("." + text) && qualify_name(name)
+            val plain_name = words.isEmpty && !delims && text != name && name.endsWith("." + text) &&
+              (qualify_name(name) || shadows(name, text))
             if (notation_word || plain_name) XML.Elem(markup, List(XML.Text(name)))
             else XML.Elem(markup, rewrite(b))
           case XML.Elem(markup, b) => XML.Elem(markup, rewrite(b))

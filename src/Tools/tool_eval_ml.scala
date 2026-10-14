@@ -12,6 +12,9 @@ object Tool_Eval_ML {
 }
 
 class Tool_Eval_ML extends PIDE_MCP_Tool("eval_ml") {
+  override def start(sessions: PIDE_MCP_Sessions, session: PIDE_MCP_Session, progress: Progress): Unit =
+    if (session.options.string("pide_mcp_qualify_names") != "none") Tool_Eval_ML_Base_Consts.load(session)
+
   def description: String =
     "Evaluate ML code at a position of a theory, with the ML structures of its imports and the context there " +
       "(`Context.the_generic_context ()`); returns echoed values and `writeln`/`tracing` output. Nothing is modified and " +
@@ -39,3 +42,29 @@ class Tool_Eval_ML extends PIDE_MCP_Tool("eval_ml") {
 }
 
 class Tools_Eval_ML extends PIDE_MCP_Tools(new Tool_Eval_ML)
+
+object Tool_Eval_ML_Base_Consts {
+  // all constants of the session image (its base sessions), one full name per line
+  val code: String =
+    "let val tab = fold (fn n => fn tab => fold (fn (c, _) => Symtab.update (c, ())) " +
+      "(#constants (Consts.dest (Sign.consts_of (Thy_Info.get_theory n)))) tab) (Thy_Info.get_names ()) Symtab.empty " +
+      "in writeln (cat_lines (Symtab.keys tab)) end"
+
+  // in the background after a session start: the base-session constants, for PIDE_MCP_Util.Qualify_Names (shadowing)
+  def load(session: PIDE_MCP_Session): Unit =
+    Isabelle_Thread.fork(name = s"pide_mcp_base_consts_${session.id}", daemon = true) {
+      Exn.result {
+        val progress = new Progress
+        Tool_Suggest_Facts.ensure_helper(session, progress, "$PIDE_MCP_HOME/ml/PIDE_MCP_Eval.thy",
+          "ML evaluation", needs_hol = false)
+        val node_name = session.node_name(Path.explode("$PIDE_MCP_HOME/ml/PIDE_MCP_Eval.thy").expand.implode)
+        val snapshot = session.node_snapshot(node_name)
+        val offset = PIDE_MCP_Tool_Util.default_query_position(snapshot)._1
+        val result = new PIDE_MCP_Query(session, PIDE_MCP_Editor.Context(node_name, offset), Tool_Eval_ML.operation, progress)
+          .run(List(code), Some(Time.seconds(120)))
+        if (result.outcome == PIDE_MCP_Query.Outcome.finished)
+          PIDE_MCP_Util.Qualify_Names.add_base_consts(split_lines(result.text).map(_.trim).filter(_.nonEmpty))
+      }
+      ()
+    }
+}

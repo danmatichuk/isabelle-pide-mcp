@@ -34,4 +34,4 @@ option pide_mcp_auto_inspect_timeout : int = 5 for pide_mcp
   -- "method timeout of an automatic inspection (seconds)"
 
 option pide_mcp_qualify_names : string = "notation" for pide_mcp
-  -- "print constants with their full name in the MCP's output: notation (a constant whose notation is a single word, e.g. map for a project constant), outside_base (also constants of theories outside the base sessions), all, none"
+  -- "print constants with their full name in the MCP's output: notation (a constant whose notation is a single word, or whose plain name shadows a base-session constant, e.g. a project's map), outside_base (also constants of theories outside the base sessions), all, none"
