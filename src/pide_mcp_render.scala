@@ -106,27 +106,42 @@ object PIDE_MCP_Render {
       case None => scalar(loc.getOrElse("line", "?"))
     }
     val kinds = str_list(loc.getOrElse("kinds", Nil)).mkString(",")
+    val inspection = loc.get("inspection").map(obj)
     s"line $range  [$kinds]" + loc.get("running_seconds").fold("")(s => "  (running for " +
-      loc.get("running_ms").fold(s"${scalar(s)} s")(ms => s"${scalar(ms)} ms") +
-      loc.get("interrupt_sent_seconds").fold("")(i => s"; interrupt sent ${scalar(i)} s ago, waiting for it to stop") + ")") +
+      loc.get("running_ms").collect { case ms: Long if ms < 1000 => s"$ms ms"; case ms: Int if ms < 1000 => s"$ms ms" }
+        .getOrElse(s"${scalar(s)} s") +
+      loc.get("interrupt_sent_seconds").fold("")(i => s"; interrupt sent ${scalar(i)} s ago, waiting for it to stop") +
+      inspection.fold("")(diagnostic_note) + ")") +
       loc.get("first_message").fold("")(m => "  " + scalar(m)) +
-      loc.get("inspection").filter(_ => with_inspection).fold("")(i => inspection_lines(obj(i)).map("\n   " + _).mkString)
+      inspection.filter(_ => with_inspection).fold("")(i =>
+        inspection_lines(i, loc.contains("running_seconds")).map("\n   " + _).mkString)
   }
 
   private val entry_skip = Set("status", "timing_ms", "source", "kinds", "interrupt_sent_seconds", "inspection")
 
-  // the automatic inspection of a step: at most three lines
-  def inspection_lines(i: Map[String, Any]): List[String] =
-    if (i.get("status").contains("running")) List("auto-inspect: running (the same method in the background)")
+  // the diagnostic (instrumented copy of the method) of a command whose real run is still going on: its own time
+  private def diagnostic_note(i: Map[String, Any]): String =
+    if (i.get("status").contains("running"))
+      i.get("diagnostic_running_seconds").fold("; diagnostic for slow method running")(s =>
+        s"; diagnostic for slow method running for ${scalar(s)} s")
+    else i.get("diagnostic_timed_out_at_seconds").fold("")(n => s"; diagnostic for slow method timed out at ${scalar(n)}s")
+
+  // the automatic inspection of a step: at most three lines; running: the command still runs (the note is in its line)
+  def inspection_lines(i: Map[String, Any], running: Boolean = false): List[String] =
+    if (i.get("status").contains("running"))
+      if (running) Nil else List("auto-inspect: running (an instrumented copy of the method, in the background)")
     else {
       val trigger = scalar(i.getOrElse("trigger", "?"))
       val log = i.get("log").map(l => s"log: ${scalar(l)}")
       val inspected = i.contains("outcome")
+      val method = scalar(i.getOrElse("method", "?"))
+      val uses = s"${scalar(i.getOrElse("uses", 0))} rule uses"
       val head =
-        if (inspected)
-          s"auto-inspect ($trigger): `${scalar(i.getOrElse("method", "?"))}` ${scalar(i.getOrElse("outcome", "?"))}, " +
-            s"${scalar(i.getOrElse("uses", 0))} rule uses"
-        else s"auto-inspect ($trigger): no method of its own to replay"
+        if (!inspected) s"auto-inspect ($trigger): no method of its own to replay"
+        else if (i.contains("diagnostic_timed_out_at_seconds"))  // running: the time-out is in the command's line
+          s"auto-inspect ($trigger): " + (if (running) "" else scalar(i.getOrElse("outcome", "?")) + "; ") +
+            s"`$method`: $uses in the diagnostic"
+        else s"auto-inspect ($trigger): `$method` ${scalar(i.getOrElse("outcome", "?"))}, $uses"
       val top = str_list(i.getOrElse("top_rules", Nil))
       val suggested = str_list(i.getOrElse("suggested_facts", Nil))
       head :: str_list(i.getOrElse("loops", Nil)).take(1) :::
@@ -141,10 +156,18 @@ object PIDE_MCP_Render {
     val source = scalar(cmd.getOrElse("source", "")).linesIterator.toList
     val status = str_list(cmd.getOrElse("status", Nil)).mkString(",")
     val kinds = str_list(cmd.getOrElse("kinds", Nil)).mkString(",")
+    val running = str_list(cmd.getOrElse("status", Nil)).exists(Set("running", "still_running_possibly_nonterminating"))
+    val inspection = cmd.get("inspection").map(obj)
     val info = List(
       Option.when(status.nonEmpty)(status),
       Option.when(kinds.nonEmpty && kinds != status)(s"kinds: $kinds"),
-      cmd.get("timing_ms").map(t => s"${scalar(t)} ms"),
+      cmd.get("timing_ms").map(t =>
+        if (!running) s"${scalar(t)} ms"
+        else t match {  // the real run
+          case ms: Long if ms >= 1000 => s"running for ${ms / 1000} s" + inspection.fold("")(diagnostic_note)
+          case ms: Int if ms >= 1000 => s"running for ${ms / 1000} s" + inspection.fold("")(diagnostic_note)
+          case _ => s"running for ${scalar(t)} ms" + inspection.fold("")(diagnostic_note)
+        }),
       cmd.get("interrupt_sent_seconds").map(i => s"interrupt sent ${scalar(i)} s ago, waiting for it to stop")).flatten.mkString("; ")
     val extra = cmd.toList.filterNot(p => entry_skip.contains(p._1)).flatMap {
       case ("bad", bad) =>
@@ -155,7 +178,7 @@ object PIDE_MCP_Render {
         }
       case (key, v) => entry(key, v)
     }
-    source ::: indent(3, s"[$info]" :: extra ::: cmd.get("inspection").toList.flatMap(i => inspection_lines(obj(i))))
+    source ::: indent(3, s"[$info]" :: extra ::: inspection.toList.flatMap(inspection_lines(_, running)))
   }
 
   private def is_full(cmd: Map[String, Any]): Boolean = cmd.contains("source")
@@ -226,7 +249,7 @@ object PIDE_MCP_Render {
       state.get("earlier_problems").map(n => "*** earlier problems: " + scalar(n) + " ***").toList
     val note_lines = note
     val slow = list(state.getOrElse("slow_steps", Nil)).map(obj)
-    val slow_lines = if (slow.isEmpty) Nil else "" :: "slow steps (inspected):" :: slow.map(location_line)
+    val slow_lines = if (slow.isEmpty) Nil else "" :: "inspected steps that finished OK:" :: slow.map(location_line)
     val first = state.get("first_problem").map(p => List("first problem: " + location_line(obj(p), false)) :::
       state.get("open_proof").map(n => "*** " + scalar(n) + " ***").toList)
     def section(key: String, title: String): List[String] =

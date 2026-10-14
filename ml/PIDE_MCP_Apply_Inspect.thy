@@ -87,7 +87,8 @@ fun report [method_arg, criteria_arg, max_uses_arg, timeout_arg, statements_arg]
                   else "The method fails."
                | SOME msg => "The method raised an error: " ^ plain_limit 1000 (Pretty.str msg)))
           | Exn.Exn (Timeout.TIMEOUT _) =>
-              "The method did not finish within " ^ timeout_arg ^ " s (it may loop)."
+              "The instrumented method did not finish within " ^ timeout_arg ^ " s (the instrumentation " ^
+                "makes it slower than the real method, whose timing get_state shows)."
           | Exn.Exn exn =>
               if Exn.is_interrupt_breakdown exn then
                 "The method ran out of stack or memory (it may loop)."

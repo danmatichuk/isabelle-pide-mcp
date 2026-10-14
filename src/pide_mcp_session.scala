@@ -179,7 +179,7 @@ class PIDE_MCP_Session private(
         }
     }
   session.commands_changed += running_consumer
-  PIDE_MCP_Command.Status.brief_ms = (options.real("pide_mcp_auto_inspect_after") * 1000).toLong
+  PIDE_MCP_Command.Status.brief_ms = (options.real("pide_mcp_possibly_looping_after") * 1000).toLong
   PIDE_MCP_Util.Qualify_Names.init(options, resources.session_base.loaded_theories.keys,
     theory => Exn.result(resources.find_theory_node(theory)) match {
       case Exn.Res(Some(name)) if name.path.is_file => Some(name.path)

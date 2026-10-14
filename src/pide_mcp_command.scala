@@ -15,9 +15,10 @@ object PIDE_MCP_Command {
     val unprocessed = "unprocessed"
     // experimental verbose name: remind agents of possible non-termination
     val running = "still_running_possibly_nonterminating"
-    // a command that has run for less than brief_ms is labelled just "running" (the status itself is the same)
+    // a command whose real run has taken less than brief_ms (pide_mcp_possibly_looping_after) is labelled just
+    // "running" (the status itself is the same)
     val running_briefly = "running"
-    @volatile var brief_ms: Long = 5000
+    @volatile var brief_ms: Long = 30000
     val warned = "warned"
     val failed = "failed"
     val finished = "finished"
@@ -405,7 +406,7 @@ object PIDE_MCP_Command {
         previous = Some((line, state.cmd.span.name))
         val problem_kinds = state.problem_kinds
         if (problem_kinds.isEmpty && detail != Detail.summary && slow_steps.length < 5 && state.inspection.nonEmpty)
-          slow_steps += state.location_json(doc, List("slow"))
+          slow_steps += state.location_json(doc, List("finished"))
         val failure = problem_kinds.exists(Set(Status.failed, "errors"))
         val cause =
           if (problem_kinds.isEmpty || first_problem.isEmpty) None
@@ -434,7 +435,7 @@ object PIDE_MCP_Command {
         "errors", "warnings", Status.unprocessed, Status.finished)
       Status.prefix_keys(JSON_Object("total_timing_ms" -> total_timing_ms) ++
         JSON_Object(kinds.map(kind => kind -> counts(kind)))) ++
-        // a subset of commands_still_running_possibly_nonterminating: running for less than brief_ms
+        // a subset of commands_still_running_possibly_nonterminating: running for less than pide_mcp_possibly_looping_after
         JSON_Object("commands_running_briefly" -> counts(Status.running_briefly)) ++
         JSON.optional("first_problem" -> first_problem) ++
         JSON_Object.if_proper(slow_steps.nonEmpty, JSON_Object("slow_steps" -> slow_steps.toList)) ++
@@ -573,7 +574,7 @@ object PIDE_MCP_Command {
         Option.when(end_line > line)("end_line" -> end_line),
         Some("kinds" -> kinds),
         Option.when(status.contains(Status.running))("running_seconds" -> running_ms / 1000),
-        Option.when(running_briefly)("running_ms" -> running_ms),
+        Option.when(status.contains(Status.running))("running_ms" -> running_ms),  // the real run
         interrupt_sent_seconds.map("interrupt_sent_seconds" -> _),
         first_message().filter(_.nonEmpty).map("first_message" -> _),
         inspection.map("inspection" -> _)))

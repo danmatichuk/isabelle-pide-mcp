@@ -37,23 +37,28 @@ object PIDE_MCP_Auto_Inspect {
     method: Option[String] = None,
     suggested: List[String] = Nil,
     dominant: Option[String] = None,
-    subgoals_left: Option[Int] = None  // a terminal step: the goals left after its (successful) method
+    subgoals_left: Option[Int] = None,  // a terminal step: the goals left after its (successful) method
+    timed_out: Option[Int] = None  // the diagnostic stopped at its time limit (seconds)
   ) {
     // the suggestions are for the goal left by the method, not for the goal before it
     def suggested_for: Option[String] =
       subgoals_left.filter(_ > 0).map(n => s"the $n subgoal${if (n == 1) "" else "s"} left")
 
-    // finished_ms: the real step has finished OK after so long (it was only slow, not looping)
+    /* times: of the real run (finished_ms, real_finished_ms; the trigger) or of the diagnostic, the instrumented
+       copy of the method, which is slower (probe_seconds, diagnostic_*) */
     def json(finished_ms: Option[Long] = None): JSON.Object.T = {
+      val real_ms = finished_ms.filter(_ => timed_out.nonEmpty)
       val outcome1 =
-        finished_ms match {
-          case Some(ms) if outcome.startsWith("did not finish") =>
-            s"slow: the step finished OK" + (if (ms > 0) s" in ${ms / 1000} s" else "") +
-              "; the probe stopped at its time limit"
-          case _ => outcome
+        real_ms match {
+          case Some(ms) =>
+            "the step finished OK" + (if (ms > 0) s" in ${ms / 1000} s (real run)" else "") +
+              s"; diagnostic for slow method timed out at ${timed_out.get}s"
+          case None => outcome
         }
       JSON_Object("trigger" -> trigger, "uses" -> uses, "probe_seconds" -> (elapsed.ms / 100).toDouble / 10) ++
         JSON.optional("method" -> method) ++
+        JSON.optional("diagnostic_timed_out_at_seconds" -> timed_out) ++
+        JSON.optional("real_finished_ms" -> real_ms) ++
         JSON_Object.if_proper(outcome.nonEmpty, JSON_Object("outcome" -> outcome1, "top_rules" -> top)) ++
         JSON.optional("dominant_rule" -> dominant) ++
         JSON.optional("subgoals_left" -> subgoals_left) ++
@@ -74,8 +79,9 @@ object PIDE_MCP_Auto_Inspect {
       names.exists(n => n == "super" || n.startsWith("super(")) || base.startsWith("arity_") || base.startsWith("classrel_")
   }
 
-  // results by evaluation: an edited (re-evaluated) command has a new key; None: the probe is running
+  // results by evaluation: an edited (re-evaluated) command has a new key; None: the probe is running (since when)
   private val results = Synchronized(Map.empty[Key, Option[Result]])
+  private val started = Synchronized(Map.empty[Key, Time])
   private val order = Synchronized(Vector.empty[Key])
 
   def key(snapshot: Document.Snapshot, cmd: Command): Option[Key] =
@@ -88,7 +94,7 @@ object PIDE_MCP_Auto_Inspect {
 
   // probed while running, now failed: the suggestions are still to come
   def needs_suggestions(key: Key): Boolean =
-    results.value.get(key).exists(_.exists(r => r.suggested.isEmpty && r.trigger.startsWith("running")))
+    results.value.get(key).exists(_.exists(r => r.suggested.isEmpty && r.trigger.startsWith("real run")))
 
   private[mcp] def add_suggestions(key: Key, suggestions: List[String], session_id: String): Unit =
     if (suggestions.nonEmpty) {
@@ -106,7 +112,10 @@ object PIDE_MCP_Auto_Inspect {
 
   def json(snapshot: Document.Snapshot, cmd: Command, finished_ms: Option[Long] = None): Option[JSON.Object.T] =
     get(snapshot, cmd).map {
-      case None => JSON_Object("status" -> "running")
+      case None =>
+        JSON_Object("status" -> "running") ++
+          JSON.optional("diagnostic_running_seconds" ->
+            key(snapshot, cmd).flatMap(started.value.get).map(t => (Time.now() - t).ms / 1000))
       case Some(result) => result.json(finished_ms)
     }
 
@@ -116,6 +125,7 @@ object PIDE_MCP_Auto_Inspect {
       else {
         order.change(keys => (keys :+ key).takeRight(results_keep))
         val keep = order.value.toSet
+        started.change(m => m.filter(p => keep(p._1)) + (key -> Time.now()))
         (true, map.filter(p => keep(p._1)) + (key -> None))
       }
     }
@@ -203,16 +213,18 @@ object PIDE_MCP_Auto_Inspect {
       case Exn.Exn(_) => None
     }).flatten
     val outcome0 = head.headOption.getOrElse("no result").stripPrefix("error: ")
+    // the time limit of the diagnostic: says nothing about the real run, which is not instrumented
+    val timed_out = """did not finish within (\d+) s""".r.findPrefixMatchOf(outcome0).flatMap(_.group(1).toIntOption)
     val outcome =
       subgoals_left match {
         case Some(n) if n > 0 && outcome0 == "succeeds" =>
           s"succeeds but does not finish the proof: $n subgoal${if (n == 1) "" else "s"} left"
-        case _ => outcome0
+        case _ => timed_out.fold(outcome0)(n => s"diagnostic for slow method timed out at ${n}s")
       }
     Result(trigger, if (!inspected) "" else outcome,
       head.drop(1).filter(_.startsWith("***")), top, uses, log,
       suggested = suggestions.take(suggest_shown).map(s => s.takeWhile(_ != ':').trim), dominant = dominant,
-      subgoals_left = subgoals_left)
+      subgoals_left = subgoals_left, timed_out = timed_out)
   }
 }
 
@@ -369,7 +381,7 @@ class PIDE_MCP_Auto_Inspector(session: PIDE_MCP_Session) {
         val now = Time.now()
         for ((key, (cmd, since)) <- running.value if now - since >= after) {
           running.change(_ - key)
-          enqueue(key, cmd, s"running for ${after.seconds.toInt} s")
+          enqueue(key, cmd, s"real run over ${after.seconds.toInt} s")
         }
         pending.change_result(queue => (queue.headOption, queue.drop(1))) match {
           case Some((key, cmd, trigger)) => if (valid(key, cmd)) probe(key, cmd, trigger)
