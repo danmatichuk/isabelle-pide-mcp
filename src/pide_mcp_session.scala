@@ -168,6 +168,18 @@ class PIDE_MCP_Session private(
     }
   session.runtime_statistics += statistics_consumer
 
+  private val running_consumer =
+    Session.Consumer[Session.Commands_Changed]("pide_mcp_running") {
+      case changed =>
+        val snapshot = session.snapshot()
+        for (name <- changed.nodes) {
+          val node_snapshot = snapshot.switch(name)
+          PIDE_MCP_Command.Running_Clock.observe(node_snapshot,
+            changed.commands.filter(_.node_name == name))
+        }
+    }
+  session.commands_changed += running_consumer
+
   def runtime_statistics(): List[Properties.T] = statistics.value.toList
 
   private val overlay_updates =
@@ -175,6 +187,7 @@ class PIDE_MCP_Session private(
 
   def stop(): Process_Result = {
     session.runtime_statistics -= statistics_consumer
+    session.commands_changed -= running_consumer
     val result = session.stop()
     overlay_updates.shutdown()
     result

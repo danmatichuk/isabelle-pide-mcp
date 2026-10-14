@@ -365,14 +365,15 @@ object PIDE_MCP_Tool_Util {
       PIDE_MCP_Command.State.Options(source_max_lines = 1),
       PIDE_MCP_Command.State.Detail.full, Some(0), 1)
     // the line is in first_problem; the full message in the first entry of the problems (which has no line key)
-    val line = state.get("first_problem").collect { case JSON.Object(o) => o.get("line") }.flatten
-      .collect { case n: Int => n; case n: Long => n.toInt }
+    val first = state.get("first_problem").collect { case JSON.Object(o) => o }
+    val line = first.flatMap(_.get("line")).collect { case n: Int => n; case n: Long => n.toInt }
     val message = state.get("problems").collect { case JSON.Object(o) => o.get("problems") }.flatten
       .collect { case (JSON.Object(entry)) :: _ => entry.get("error") }.flatten.flatMap {
         case s: String => Some(s)
         case (s: String) :: _ => Some(s)
         case _ => None
       }
+      .orElse(first.flatMap(_.get("first_message")).collect { case s: String => s })  // e.g. a cancelled command
     for (l <- line; m <- message) yield (l, m.trim.take(600))
   }
 

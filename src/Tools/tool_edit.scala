@@ -222,6 +222,11 @@ class Tool_Edit extends PIDE_MCP_Tool("edit") {
       "do not write the file and say so. Without this, such an edit reloads the file and everything that depends on it just to report the error. " +
       "Set to false only if the check is wrong (it does not run the code, so it cannot judge names and types).",
     true)
+  private val cancel_after_arg = PIDE_MCP_Tool_Arg.int_default(
+    "cancel_after_seconds",
+    "Time limit per command for a theory: interrupt any command of the edited lines that is still running after this many " +
+      "seconds (it then shows as `canceled`, as with the `cancel` tool). 0: no limit.",
+    0, minimum = Some(0), maximum = Some(3600))
   private val check_arg = PIDE_MCP_Tool_Arg.bool_default(
     "check",
     "Opt-in: also wait (up to `check_wait_seconds`) for the file to be processed and return the status of the whole file " +
@@ -233,7 +238,8 @@ class Tool_Edit extends PIDE_MCP_Tool("edit") {
   def input_schema: JSON.Object.T = PIDE_MCP_Tool_Schema.input_schema(
     List(PIDE_MCP_Tool_Schema.running_session_arg, PIDE_MCP_Tool_Schema.origin_arg, mode_arg,
       text_arg, PIDE_MCP_Tool_Schema.opt_start_line_arg,
-      PIDE_MCP_Tool_Schema.opt_end_line_arg, old_text_arg, edit_all_arg, check_arg, check_wait_arg, check_ml_arg))
+      PIDE_MCP_Tool_Schema.opt_end_line_arg, old_text_arg, edit_all_arg, check_arg, check_wait_arg, check_ml_arg,
+      cancel_after_arg))
 
   override def annotations: Option[JSON.Object.T] = Some(JSON_Object("destructiveHint" -> true))
 
@@ -260,9 +266,15 @@ class Tool_Edit extends PIDE_MCP_Tool("edit") {
           ml_blocked.get + "\nFix the text and edit again (check_ml: false writes it anyway).")
         else if (count > 0) ("written", s"Edited $count occurrence(s)" + ml_note.fold("")(n => s". ML syntax pre-check found no error, but $n"))
         else ("unchanged", "Unchanged - did you replace the text by itself?")
+      val cancel_after = cancel_after_arg.get(args)
+      val time_limit =
+        if (cancel_after > 0 && count > 0 && ml_blocked.isEmpty && node_name.is_theory) edited_range else None
+      for ((from, to) <- time_limit) Tool_Cancel.cancel_after(session, node_name, from, to, cancel_after)
       val checked =
         if (check_arg.get(args)) check_state(session, node_name, check_wait_arg.get(args), progress, edited_range) else None
       JSON_Object("status" -> status, "description" -> description) ++
+        JSON.optional("time_limit" -> time_limit.map { case (from, to) =>
+          s"commands of lines $from-$to that run longer than $cancel_after s are cancelled" }) ++
         JSON.optional("provisional" -> checked.flatMap(_._1)) ++
         (if (count > 0) JSON_Object("reprocessed" -> reloads.fold(
           reason => JSON_Object("unavailable" -> reason), identity)) else JSON_Object()) ++

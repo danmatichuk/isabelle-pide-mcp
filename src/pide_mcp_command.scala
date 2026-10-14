@@ -32,6 +32,38 @@ object PIDE_MCP_Command {
   def status(snapshot: Document.Snapshot, command: Command): Document_Status.Command_Status =
     snapshot.state.command_status(snapshot.version, command)
 
+  def eval_exec(snapshot: Document.Snapshot, command: Command): Option[Document_ID.Exec] =
+    snapshot.state.assignments.get(snapshot.version.id).flatMap(_.command_execs.get(command.id)).flatMap(_.headOption)
+
+  /* Since when an evaluation of a command runs: PIDE times the evaluation itself, but not a forked proof
+     (`by` of a lemma), which then shows 0 ms however long it runs. Fed by each session's commands_changed. */
+  object Running_Clock {
+    private val since = Synchronized(Map.empty[(Document_ID.Command, Document_ID.Exec), Time])
+
+    def observe(snapshot: Document.Snapshot, commands: Set[Command]): Unit = {
+      val now = Time.now()
+      val updates = commands.toList.map(cmd =>
+        (cmd.id, eval_exec(snapshot, cmd), snapshot.node_name.is_theory && status(snapshot, cmd).is_running))
+      since.change(map => updates.foldLeft(map) {
+        case (m, (id, Some(exec), true)) => if (m.contains((id, exec))) m else m + ((id, exec) -> now)
+        case (m, (id, _, _)) => m.filterNot(_._1._1 == id)
+      })
+    }
+
+    // evaluations interrupted by `cancel` or a time limit, with their running time then: they are shown as canceled
+    private val canceled = Synchronized(Map.empty[(Document_ID.Command, Document_ID.Exec), Long])
+
+    def cancel(snapshot: Document.Snapshot, command: Command, running_ms: Long): Unit =
+      eval_exec(snapshot, command).foreach(exec => canceled.change(_ + ((command.id, exec) -> running_ms)))
+
+    def canceled_ms(snapshot: Document.Snapshot, command: Command): Option[Long] =
+      eval_exec(snapshot, command).flatMap(exec => canceled.value.get((command.id, exec)))
+
+    def elapsed_ms(snapshot: Document.Snapshot, command: Command): Long =
+      eval_exec(snapshot, command).flatMap(exec => since.value.get((command.id, exec)))
+        .fold(0L)(t => (Time.now() - t).ms)
+  }
+
   private def status_list(status: Document_Status.Command_Status): List[String] =
     List(
       Option.when(status.is_unprocessed)(Status.unprocessed),
@@ -360,13 +392,22 @@ object PIDE_MCP_Command {
     private def has_markup(elements: Markup.Elements): Boolean =
       snapshot.select(command_range, elements, _ => { case _ => Some(()) }).nonEmpty
 
-    lazy val status: List[String] =
-      status_list(cmd_status).filter {
+    // interrupted by `cancel` or a time limit, after this many ms (not once it runs again)
+    lazy val canceled_ms: Option[Long] =
+      Running_Clock.canceled_ms(snapshot, cmd).filter(_ => !cmd_status.is_running)
+
+    lazy val status: List[String] = {
+      val list = status_list(cmd_status).filter {
         case Status.warned => has_markup(Markup.Elements(Markup.WARNING, Markup.LEGACY))
         case Status.failed => has_markup(Markup.Elements(Markup.FAILED, Markup.ERROR))
         case _ => true
       }
+      if (canceled_ms.nonEmpty && !list.contains(Status.canceled)) list :+ Status.canceled else list
+    }
     lazy val timing_ms: Long = cmd_status.timings.sum(Date.now()).ms
+    // how long the command has been running, also for a forked proof
+    lazy val running_ms: Long =
+      if (status.contains(Status.running)) timing_ms max Running_Clock.elapsed_ms(snapshot, cmd) else 0L
     lazy val errors: Int = results.count(Protocol.is_error)
     lazy val warnings: Int = results.count(Protocol.is_warning_or_legacy)
     lazy val bad: List[JSON.Object.T] = bad_json(snapshot, command_range)
@@ -399,6 +440,9 @@ object PIDE_MCP_Command {
         .orElse(message_summary(texts(Protocol.is_warning_or_legacy)))
         .orElse(bad.headOption.flatMap(_.get("message")).collect { case s: String => message_line(s) })
         .orElse(outside_hint)
+        .filter(_.nonEmpty)
+        .map(line => canceled_ms.fold(line)(ms => s"cancelled after ${ms / 1000} s; $line"))
+        .orElse(canceled_ms.map(ms => s"cancelled after ${ms / 1000} s"))
         .map(line =>
           if (line.length <= max_length) line
           else {  // cut at a word boundary
@@ -416,6 +460,7 @@ object PIDE_MCP_Command {
         Some("line" -> line),
         Option.when(end_line > line)("end_line" -> end_line),
         Some("kinds" -> kinds),
+        Option.when(status.contains(Status.running))("running_seconds" -> running_ms / 1000),
         first_message().filter(_.nonEmpty).map("first_message" -> _)))
     }
 
@@ -430,7 +475,7 @@ object PIDE_MCP_Command {
       val entries: List[Option[JSON.Object.Entry]] =
         List(
           Some("status" -> status),
-          Some("timing_ms" -> timing_ms),
+          Some("timing_ms" -> (timing_ms max running_ms)),
           Some("source" -> source),
           outside_hint.map("hint" -> _),
           proper_list(bad).map("bad" -> _)) :::

@@ -105,7 +105,8 @@ object PIDE_MCP_Render {
       case None => scalar(loc.getOrElse("line", "?"))
     }
     val kinds = str_list(loc.getOrElse("kinds", Nil)).mkString(",")
-    s"line $range  [$kinds]" + loc.get("first_message").fold("")(m => "  " + scalar(m))
+    s"line $range  [$kinds]" + loc.get("running_seconds").fold("")(s => s"  (running for ${scalar(s)} s)") +
+      loc.get("first_message").fold("")(m => "  " + scalar(m))
   }
 
   private val entry_skip = Set("status", "timing_ms", "source", "kinds")
@@ -139,8 +140,8 @@ object PIDE_MCP_Render {
       "theory imports are qualified by their session (e.g. `Box.Box`, not `" + m.group(1) +
         "`): `get_session_state` lists the sessions and their directories")
     val interrupt_hint = Option.when(json_text.contains("Interrupt"))(
-      "an Interrupt means a time limit was hit or the command was cancelled (e.g. by a newer edit), not a logic error: " +
-        "retry once; if it repeats, the proof method is too slow: give it fewer rules or use `sledgehammer`")
+      "an Interrupt means a time limit was hit or the command was cancelled (by `cancel`, `cancel_after_seconds` or a newer edit), " +
+        "not a logic error: the method was too slow: give it fewer rules or use `sledgehammer`")
     import_hint.toList ::: interrupt_hint.toList
   }
 
@@ -215,7 +216,7 @@ object PIDE_MCP_Render {
       }
       val ml_errors = list(sync.getOrElse("files", Nil)).map(obj).flatMap(_.get("ml_syntax_error")).map(scalar)
       List("external edits synced: " + files.mkString(", ") +
-        " [tip: `edit` with check:true applies a change, waits and checks it in one call]" +
+
         ml_errors.map("\n*** " + _ + " ***").mkString +
         sync.get("diff_file").fold("") { f =>
           val path = scalar(f)
