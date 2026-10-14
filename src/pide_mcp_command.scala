@@ -233,7 +233,7 @@ object PIDE_MCP_Command {
     val header =
       Option.when(n >= goal_size_note_lines || large)(
         s"($label: $n lines, $chars characters" +
-          (if (large) "; VERY LARGE: the method probably blew the term up, try a more targeted method" else "") + ")")
+          (if (large) "; VERY LARGE: the method probably blew the term up" else "") + ")")
     val cut =
       if (max_lines <= 0 || n <= max_lines && chars <= max_chars) text
       else {
