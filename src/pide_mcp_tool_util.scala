@@ -513,6 +513,28 @@ object PIDE_MCP_Tool_Util {
 
   // offset in the file for a query: the end of a line (or the given prefix of it), by default the
   // first command (the theory header), where the theory context with all imports is available
+  /* The default position of a query: the last command before the theory's `end` (the context with everything the file
+     defines). Commands after that `end` (e.g. behind an `end` fence) have no theory context ("Unknown context"), and a
+     command that is not processed yet has no state: then the last processed command before it, with a note. */
+  def default_query_position(snapshot: Document.Snapshot): (Text.Offset, Option[String]) = {
+    val proper = snapshot.node.commands.iterator.filter(!_.is_ignored).toList
+    def status(cmd: Command) = PIDE_MCP_Command.status(snapshot, cmd)
+    val theory_end = proper.indexWhere(cmd => status(cmd).finalized)
+    val before =
+      if (theory_end >= 0) proper.take(theory_end)
+      else proper.reverse.dropWhile(_.span.name == "end").reverse
+    val target = before.lastOption.orElse(proper.headOption).getOrElse(error("The file has no commands"))
+    val (cmd, note) =
+      if (status(target).is_finished) (target, None)
+      else before.reverseIterator.find(cmd => status(cmd).is_finished) match {
+        case Some(processed) =>
+          (processed, Some("the end of the file is not processed yet (or failed): searched after the last processed command; " +
+            "facts defined after it are missing"))
+        case None => (target, None)
+      }
+    (snapshot.node.command_start(cmd).getOrElse(error("The file has no commands")), note)
+  }
+
   def query_offset(
     snapshot: Document.Snapshot,
     start_line: Option[Int],
@@ -520,10 +542,7 @@ object PIDE_MCP_Tool_Util {
   ): Text.Offset = {
     val doc = Line.Document(snapshot.node.source)
     start_line match {
-      case None => // the last command before `end`: the context with everything the file defines
-        val proper = snapshot.node.commands.iterator.filter(!_.is_ignored).toList
-        proper.reverseIterator.find(_.span.name != "end").orElse(proper.headOption)
-          .flatMap(snapshot.node.command_start).getOrElse(error("The file has no commands"))
+      case None => default_query_position(snapshot)._1
       case Some(line) =>
         require_lines_in_bounds(Some(line), None, doc.lines.length)
         val range = PIDE_MCP_Util.text_range(doc, line, line).get

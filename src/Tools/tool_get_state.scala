@@ -58,6 +58,11 @@ class Tool_Get_State extends PIDE_MCP_Tool("get_state") {
     "Source lines shown per command (`full` detail).",
     PIDE_MCP_Command.State.default_source_max_lines, minimum = Some(1))
 
+  private val goal_max_lines_arg = PIDE_MCP_Tool_Arg.int_default(
+    "goal_max_lines",
+    "Lines shown per goal (a goal blown up by a method is cut with a marker). 0: no cap.",
+    PIDE_MCP_Command.State.default_goal_max_lines, minimum = Some(0))
+
   private val include_ml_echo_arg = PIDE_MCP_Tool_Arg.bool_default(
     "include_ml_echo",
     "With `include_infos`: keep the echo of top-level ML declarations (`val x = ...`); false: explicit output only.",
@@ -92,7 +97,7 @@ class Tool_Get_State extends PIDE_MCP_Tool("get_state") {
     List(PIDE_MCP_Tool_Schema.running_session_arg, PIDE_MCP_Tool_Schema.origin_arg,
       PIDE_MCP_Tool_Schema.opt_start_line_arg, PIDE_MCP_Tool_Schema.opt_end_line_arg,
       include_types_arg, include_facts_arg, include_infos_arg, include_full_markup_arg,
-      commands_limit_arg, detail_arg, problems_limit_arg, source_max_lines_arg, info_max_lines_arg, include_ml_echo_arg,
+      commands_limit_arg, detail_arg, problems_limit_arg, source_max_lines_arg, goal_max_lines_arg, info_max_lines_arg, include_ml_echo_arg,
       wait_seconds_arg, wait_settled_arg, stop_at_error_arg, max_output_lines_arg, format_arg))
 
   override def annotations: Option[JSON.Object.T] = Some(JSON_Object("readOnlyHint" -> true))
@@ -134,7 +139,7 @@ class Tool_Get_State extends PIDE_MCP_Tool("get_state") {
       val opts = PIDE_MCP_Command.State.Options(
         include_types_arg.get(args), include_facts_arg.get(args),
         include_infos_arg.get(args), include_full_markup_arg.get(args),
-        source_max_lines_arg.get(args), info_max_lines_arg.get(args), include_ml_echo_arg.get(args))
+        source_max_lines_arg.get(args), goal_max_lines_arg.get(args), info_max_lines_arg.get(args), include_ml_echo_arg.get(args))
       val commands_limit = commands_limit_arg.get(args)
       val range = PIDE_MCP_Util.text_range(doc, start_line, end_line).get
       val states = PIDE_MCP_Command.State.states(snapshot, Some(range))

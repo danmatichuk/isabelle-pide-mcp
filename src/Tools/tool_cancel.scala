@@ -122,8 +122,22 @@ class Tool_Cancel extends PIDE_MCP_Tool("cancel") {
         PIDE_MCP_Tool_Schema.opt_start_line_arg.get(args), PIDE_MCP_Tool_Schema.opt_end_line_arg.get(args), doc.lines.length)
       val canceled = Tool_Cancel.cancel_running(session, node_name, start_line, end_line)
       if (canceled.isEmpty) {
+        // the command may have finished just before this call: say so, with its status
+        val snapshot = session.node_snapshot(node_name)
+        val doc = Line.Document(snapshot.node.source)
+        val recent = PIDE_MCP_Util.text_range(doc, start_line, end_line min doc.lines.length).toList.flatMap { range =>
+          PIDE_MCP_Command.State.commands(snapshot, Some(range)).toList.flatMap { state =>
+            PIDE_MCP_Command.Running_Clock.stopped_ago(snapshot, state.cmd).map { case (ago, ran) =>
+              val kinds = state.problem_kinds
+              s"line ${doc.position(state.command_range.start).line1} (`${state.cmd.span.name}`) finished " +
+                f"${ago.seconds}%.1f s ago after ${ran.seconds}%.1f s: " +
+                (if (kinds.isEmpty) "ok" else kinds.mkString(","))
+            }
+          }
+        }
         JSON_Object("canceled" -> Nil,
-          "note" -> s"no command is running in lines $start_line-$end_line (`get_state` shows the running ones)")
+          "note" -> (s"no command is running in lines $start_line-$end_line" +
+            (if (recent.isEmpty) " (`get_state` shows the running ones)" else "; recently finished: " + recent.mkString("; "))))
       }
       else {
         val deadline = Time.now() + Time.seconds(wait_arg.get(args))

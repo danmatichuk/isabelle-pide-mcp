@@ -39,6 +39,8 @@ object Tool_Find {
     // a file that is not loaded yet is loaded (and waited for) instead of failing the first query
     val snapshot = PIDE_MCP_Tool_Util.require_loaded_origin_snapshot(session, node_name, progress,
       Tool_Find.load_wait_seconds)
+    val default_note =
+      if (start_line_arg.get(args).isEmpty) PIDE_MCP_Tool_Util.default_query_position(snapshot)._2 else None
     val offset = PIDE_MCP_Tool_Util.query_offset(
       snapshot, start_line_arg.get(args), prefix_arg.get(args))
     val result = new PIDE_MCP_Query(session, PIDE_MCP_Editor.Context(node_name, offset), operation, progress)
@@ -48,12 +50,17 @@ object Tool_Find {
     val note =
       (if (result.outcome == PIDE_MCP_Query.Outcome.timeout)
         "\n(query cancelled after the timeout: results may be incomplete)" else "") +
-      default_line.fold("")(line => s"\n(searched at line $line, the default: end of file; pass start_line to search elsewhere)")
+      default_line.fold("")(line => s"\n(searched at line $line, the default: end of file" +
+        default_note.fold("")("; " + _) + "; pass start_line to search elsewhere)") +
+      (if (result.text.contains("Unknown context"))
+        "\n(Unknown context: the position has no theory context, e.g. it is after the theory's `end` or its command failed: " +
+          "pass a start_line inside the theory, at a processed command)" else "")
     val empty_hint =
       if (result.text.isEmpty || result.text.contains("found nothing")) "\n(an entity of a theory that this file does not import is not found: grep the " +
         "session directories listed by get_session_state, or import the theory)" else ""
     PIDE_MCP_Render.result(format_arg.get(args),
-      result.json(PIDE_MCP_Command.Message_Kind.all) ++ JSON.optional("searched_at_line" -> default_line),
+      result.json(PIDE_MCP_Command.Message_Kind.all) ++ JSON.optional("searched_at_line" -> default_line) ++
+        JSON.optional("searched_at_note" -> default_note),
       _ => (if (result.text.isEmpty) "(no results)" else refine(result.text)) + note + empty_hint)
   }
 

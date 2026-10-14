@@ -39,16 +39,29 @@ object PIDE_MCP_Command {
      (`by` of a lemma), which then shows 0 ms however long it runs. Fed by each session's commands_changed. */
   object Running_Clock {
     private val since = Synchronized(Map.empty[(Document_ID.Command, Document_ID.Exec), Time])
+    // evaluations that stopped running recently: when, and after how long (for `cancel` that comes too late)
+    private val stopped = Synchronized(Map.empty[(Document_ID.Command, Document_ID.Exec), (Time, Time)])
+    private val stopped_keep = Time.seconds(60)
 
     def observe(snapshot: Document.Snapshot, commands: Set[Command]): Unit = {
       val now = Time.now()
       val updates = commands.toList.map(cmd =>
         (cmd.id, eval_exec(snapshot, cmd), snapshot.node_name.is_theory && status(snapshot, cmd).is_running))
-      since.change(map => updates.foldLeft(map) {
-        case (m, (id, Some(exec), true)) => if (m.contains((id, exec))) m else m + ((id, exec) -> now)
-        case (m, (id, _, _)) => m.filterNot(_._1._1 == id)
-      })
+      val ended = since.change_result { map =>
+        val map1 = updates.foldLeft(map) {
+          case (m, (id, Some(exec), true)) => if (m.contains((id, exec))) m else m + ((id, exec) -> now)
+          case (m, (id, _, _)) => m.filterNot(_._1._1 == id)
+        }
+        (map.filterNot(p => map1.contains(p._1)), map1)
+      }
+      if (ended.nonEmpty || stopped.value.nonEmpty)
+        stopped.change(m => m.filter(p => now - p._2._1 < stopped_keep) ++ ended.map((k, t) => k -> (now, now - t)))
     }
+
+    // stopped running this long ago, after running for so long
+    def stopped_ago(snapshot: Document.Snapshot, command: Command): Option[(Time, Time)] =
+      eval_exec(snapshot, command).flatMap(exec => stopped.value.get((command.id, exec)))
+        .map((at, ran) => (Time.now() - at, ran))
 
     // evaluations interrupted by `cancel` or a time limit, with their running time then: they are shown as canceled
     private val canceled = Synchronized(Map.empty[(Document_ID.Command, Document_ID.Exec), Long])
@@ -177,14 +190,43 @@ object PIDE_MCP_Command {
   def message_entries(
     elements: Iterator[XML.Elem],
     kinds: List[String],
-    max_lines: Option[Int] = None
+    max_lines: Option[Int] = None,
+    goal_max_lines: Option[Int] = None
   ): List[Option[JSON.Object.Entry]] = {
     val texts = classify_results(elements)
     kinds.map(kind => texts.get(kind).map { messages =>
       // datatype and similar commands print one `consts` block per generated constant (typerep_, random_, ...)
       val shown = if (kind == "writeln" && max_lines.nonEmpty) collapse_consts(messages) else messages
-      kind -> max_lines.fold(shown)(n => shown.map(truncate_lines(_, n)))
+      kind -> (
+        if (kind == "goal" && goal_max_lines.nonEmpty) shown.map(cap_goal(_, goal_max_lines.get))
+        else max_lines.fold(shown)(n => shown.map(truncate_lines(_, n))))
     })
+  }
+
+  /* Goals that a method blew up (thousands of lines, or one line of 100k characters) flood the context: say how large a
+     big goal is, and cut it after max_lines lines (and max_lines * 200 characters). */
+  val goal_size_note_lines: Int = 30
+  val goal_warning_lines: Int = 200
+
+  def cap_goal(text: String, max_lines: Int): String = {
+    val lines = text.linesIterator.toList
+    val n = lines.length
+    val chars = text.length
+    val max_chars = max_lines.toLong * 200
+    val large = n >= goal_warning_lines || chars >= goal_warning_lines * 200
+    val header =
+      Option.when(n >= goal_size_note_lines || large)(
+        s"(goal: $n lines, $chars characters" +
+          (if (large) "; VERY LARGE: the method probably blew the term up, try a more targeted method" else "") + ")")
+    val cut =
+      if (max_lines <= 0 || n <= max_lines && chars <= max_chars) text
+      else {
+        val kept = lines.take(max_lines).mkString("\n")
+        val kept1 = if (kept.length > max_chars) kept.take(max_chars.toInt) else kept
+        val rest = n - kept1.linesIterator.length
+        kept1 + s"\n... (+$rest more lines, ${chars - kept1.length} characters; raise goal_max_lines)"
+      }
+    header.fold(cut)(_ + "\n" + cut)
   }
 
   private val collapse_consts_threshold = 3
@@ -298,6 +340,7 @@ object PIDE_MCP_Command {
 
     val default_source_max_lines: Int = 5
     val default_info_max_lines: Int = 30
+    val default_goal_max_lines: Int = 100
     val default_problems_limit: Int = 10
 
     def states_json(
@@ -373,6 +416,7 @@ object PIDE_MCP_Command {
       include_infos: Boolean = false,
       include_full_markup: Boolean = false,
       source_max_lines: Int = default_source_max_lines,
+      goal_max_lines: Int = default_goal_max_lines,
       info_max_lines: Int = default_info_max_lines,
       include_ml_echo: Boolean = true
     )
@@ -479,7 +523,7 @@ object PIDE_MCP_Command {
           Some("source" -> source),
           outside_hint.map("hint" -> _),
           proper_list(bad).map("bad" -> _)) :::
-        message_entries(results.iterator, Message_Kind.important) :::
+        message_entries(results.iterator, Message_Kind.important, goal_max_lines = Some(opts.goal_max_lines)) :::
         List(
           Option.when(opts.include_types)(
             proper_list(types_json(snapshot, range)).map("types" -> _)).flatten,
