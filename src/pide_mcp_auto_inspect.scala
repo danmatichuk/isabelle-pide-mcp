@@ -41,6 +41,7 @@ object PIDE_MCP_Auto_Inspect {
     timed_out: Option[Int] = None,  // the diagnostic stopped at its time limit (seconds)
     scenario: Option[Int] = None,  // a failed terminal step, by the real methods: 1, 2, 3 (see scenario_name)
     two_methods: Boolean = false,  // `by m1 m2`
+    goal_subgoals: Option[Int] = None,  // the number of subgoals of the scenario's goal
     goal_state: Option[String] = None  // the goal of the scenario (capped)
   ) {
     def scenario_name: Option[String] =
@@ -56,10 +57,15 @@ object PIDE_MCP_Auto_Inspect {
         case _ => s"the $subgoals left"
       }
 
-    // the relevance filter looks at subgoal 1
+    // the relevance filter looks at subgoal 1 only
     def suggested_for: Option[String] =
-      subgoals_left.filter(_ > 1).map(n => s"subgoal 1 of the $n left")
-        .orElse(goal_label).orElse(subgoals_left.filter(_ > 0).map(_ => s"the $subgoals left"))
+      if (scenario.nonEmpty)
+        goal_subgoals.orElse(subgoals_left) match {
+          case Some(n) if n > 1 =>
+            if (scenario.contains(3)) Some(s"subgoal 1 of the $n left") else goal_label.map("subgoal 1 of " + _)
+          case _ => goal_label
+        }
+      else subgoals_left.filter(_ > 0).map(n => if (n > 1) s"subgoal 1 of the $n left" else s"the $subgoals left")
 
     /* times: of the real run (finished_ms, real_finished_ms; the trigger) or of the diagnostic, the instrumented
        copy of the method, which is slower (probe_seconds, diagnostic_*) */
@@ -196,7 +202,10 @@ object PIDE_MCP_Auto_Inspect {
     val (lines, goal_lines) = split_lines(text).span(_ != "goal:")
     val goal_state = Option.when(goal_lines.length > 1)(
       PIDE_MCP_Command.cap_goal(cat_lines(goal_lines.drop(1)), PIDE_MCP_Command.State.default_goal_max_lines))
-    val scenario = lines.collectFirst { case l if l.startsWith("scenario: ") => l.stripPrefix("scenario: ").trim.toIntOption }.flatten
+    def head_int(prefix: String): Option[Int] =
+      lines.collectFirst { case l if l.startsWith(prefix) => l.stripPrefix(prefix).trim.toIntOption }.flatten
+    val scenario = head_int("scenario: ")
+    val goal_subgoals = head_int("subgoals: ")
     val (head, rest) = lines.span(_ != "counts:")
     val (counts, rest1) = rest.drop(1).span(_ != "trace:")
     val (trace, suggested_left) = rest1.span(_ != "suggested:")
@@ -246,7 +255,7 @@ object PIDE_MCP_Auto_Inspect {
         head.drop(1).filter(_.startsWith("***")), top, uses, None,
         suggested = suggestions.take(suggest_shown).map(s => s.takeWhile(_ != ':').trim), dominant = dominant,
         subgoals_left = subgoals_left, timed_out = timed_out, scenario = scenario, two_methods = two,
-        goal_state = goal_state)
+        goal_subgoals = goal_subgoals, goal_state = goal_state)
     val goal_for = result0.suggested_for.filter(_ => left_suggestions.nonEmpty)
     val suggested_lines =
       if (suggestions.isEmpty) Nil

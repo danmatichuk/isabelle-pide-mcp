@@ -24,13 +24,16 @@ fun fact_line ctxt with_statements (((name, _), thm): Sledgehammer_Fact.fact) =
     in "  " ^ name ^ ": " ^ stmt end
   else "  " ^ name;
 
-(*the facts the relevance filter selects for subgoal 1 of the goal of a proof state: section lines and fact lines*)
-fun suggest max_facts with_statements state =
+(*the facts the relevance filter selects for subgoal 1 of the goal of a proof state (its premises and conclusion
+  are the query): section lines and fact lines; with_chained: also the chained facts (`using`), which get a bonus
+  and change the weights, as in Sledgehammer*)
+fun suggest' with_chained max_facts with_statements state =
   let
     val ctxt = Proof.context_of state;
     val params = Sledgehammer_Commands.default_params (Proof.theory_of state) [];
     val fact_override = Sledgehammer_Fact.no_fact_override;
-    val {facts = chained_thms, goal, ...} = Proof.goal state;
+    val {facts, goal, ...} = Proof.goal state;
+    val chained_thms = if with_chained then facts else [];
     val (_, hyp_ts, concl_t) = ATP_Util.strip_subgoal goal 1 ctxt;
     val prover = hd (#provers params);
     val all_facts =
@@ -48,6 +51,8 @@ fun suggest max_facts with_statements state =
     if forall (null o snd) factss then ["Found no relevant facts"]
     else maps section factss
   end;
+
+val suggest = suggest' true;
 
 val _ =
   Query_Operation.register {name = "pide_mcp_suggest_facts", pri = Task_Queue.urgent_pri}

@@ -113,8 +113,8 @@ fun report [method_arg, criteria_arg, max_uses_arg, timeout_arg, statements_arg]
   first method fails, 2 the second method fails, 3 the methods apply but the finishing step of the terminal proof
   leaves "subgoals left: N"), "counts:" with one "  N name<TAB>full name" line per theorem (most used first, with the
   declarations of the first use; "<TAB>(infrastructure)" appended for sort membership rules), "trace:" with one
-  "  source: name" line per use in order, "suggested:" with the facts for the scenario's goal (lines as
-  PIDE_MCP_Suggest.suggest), and last "goal:" with that goal (with markup): before the first method, after it, or
+  "  source: name" line per use in order, "suggested:" with the facts for subgoal 1 of the scenario's goal ("subgoals:
+  N"; without the chained facts; lines as PIDE_MCP_Suggest.suggest), and last "goal:" with that goal (with markup): before the first method, after it, or
   the subgoals left.*)
 fun use_key (Apply_Inspect.Theorem (name, _)) = Thm_Name.print name
   | use_key (Apply_Inspect.Fact name) = Thm_Name.print name
@@ -226,7 +226,7 @@ fun trace (method_arg :: timeout_arg :: trace_max_arg :: terminal_args) state =
             end;
         val scenario_facts =
           (case scenario of
-            SOME (_, st) => the_default [] (try (PIDE_MCP_Suggest.suggest suggest_max true) st)
+            SOME (_, st) => the_default [] (try (PIDE_MCP_Suggest.suggest' false suggest_max true) st)
           | NONE => []);
         val scenario_goal =
           (case scenario of
@@ -246,6 +246,7 @@ fun trace (method_arg :: timeout_arg :: trace_max_arg :: terminal_args) state =
             (case scenario of
               SOME (k, st) =>
                 ("scenario: " ^ string_of_int k) ::
+                  ("subgoals: " ^ string_of_int (Thm.nprems_of (#goal (Proof.goal st)))) ::
                   (if k = 3 then ["subgoals left: " ^ string_of_int (Thm.nprems_of (#goal (Proof.goal st)))] else [])
             | NONE => []) @
             ["counts:"] @
