@@ -113,16 +113,23 @@ object PIDE_MCP_Util {
         m + (base -> (m.getOrElse(base, Set.empty) + name))
       })
 
-    // a constant not of the base sessions printed by its plain base name, which a constant of the base sessions
-    // also has (`map` for a project's own map, while List.list.map exists); collisions among library constants
-    // (two `Suc`) are not shown
+    // a constant outside the standard library (AFP, project), printed by its plain base name, while another constant
+    // of the session image has that base name (`map` for chacha20.map, while List.list.map exists); collisions among
+    // library constants (two `Suc`) are not shown
     private def shadows(name: String, text: String): Boolean =
       text == Long_Name.base_name(name) &&
-        base_consts.value.get(text).exists(names => !names.contains(name) && names.nonEmpty)
+        !library_theories.value.contains(Long_Name.explode(name).headOption.getOrElse("")) &&
+        base_consts.value.get(text).exists(_.exists(_ != name))
 
-    def init(options: Options, base: Iterable[String]): Unit = {
+    // base names of theories of the Isabelle distribution (source under $ISABELLE_HOME/src): the standard library
+    private val library_theories = Synchronized(Set.empty[String])
+
+    def init(options: Options, base: Iterable[String], source: String => Option[Path] = _ => None): Unit = {
       mode = options.string("pide_mcp_qualify_names")
       base_theories.change(_ ++ base.map(Long_Name.base_name))
+      val src = Path.explode("$ISABELLE_HOME/src").canonical.implode + "/"
+      val library = base.filter(theory => source(theory).exists(_.canonical.implode.startsWith(src)))
+      library_theories.change(_ ++ library.map(Long_Name.base_name))
     }
 
     // a constant printed by its name (not notation)

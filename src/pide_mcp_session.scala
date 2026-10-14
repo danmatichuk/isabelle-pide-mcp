@@ -179,7 +179,11 @@ class PIDE_MCP_Session private(
         }
     }
   session.commands_changed += running_consumer
-  PIDE_MCP_Util.Qualify_Names.init(options, resources.session_base.loaded_theories.keys)
+  PIDE_MCP_Util.Qualify_Names.init(options, resources.session_base.loaded_theories.keys,
+    theory => Exn.result(resources.find_theory_node(theory)) match {
+      case Exn.Res(Some(name)) if name.path.is_file => Some(name.path)
+      case _ => None
+    })
 
   def runtime_statistics(): List[Properties.T] = statistics.value.toList
 
