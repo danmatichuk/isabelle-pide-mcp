@@ -4,6 +4,7 @@ PIDE MCP NEWS -- history of user-relevant changes
 New in this PIDE MCP version
 ----------------------------
 
+* `isabelle-proof-development` skill, traps: `thm[simplified]` normalises numerals (`1` becomes `Suc 0` for nat); name the rules (`[simplified add_0]`, `[unfolded …]`) or give the instance.
 * The first `get_state` of a server run that shows a `sorry`, a failure or an open proof ends with `hint: proving? Load the isabelle-proof-development skill if you have not (shown once)`; it is never repeated.
 * After `cancel` (or a time limit), a command that has not stopped yet shows `(running for N s; interrupt sent M s ago, waiting for it to stop)` in `get_state` (`interrupt_sent_seconds` in JSON) instead of plain `still running`.
 * `get_session_state`: new `theory_paths` resolves session-qualified theory names to their source files (`HOL-Library.Multiset: .../src/HOL/Library/Multiset.thy`), so an agent that greps does not guess paths; `include_loaded_theories` gives the source file of base-session theories too.

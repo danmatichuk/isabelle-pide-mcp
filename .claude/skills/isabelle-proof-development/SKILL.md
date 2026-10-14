@@ -38,6 +38,7 @@ When automation is brittle or explodes, switch to a structured Isar proof with i
 - **A rewrite rule `g x = ...` does not rewrite a bare `g`,** as in `map g xs` (also `fold g`, `filter P`); Isabelle displays `map (λx. g x) xs` as `map g xs`. Prove the function-level equation (`g = id` by `rule ext`) and simp with that.
 - **Induction over a nested datatype** (`datatype 'a rose = Node 'a "'a rose list"`) gives the hypothesis `(⋀x. x ∈ set ts ⟹ P x)`, which plain `simp` cannot use: `simp cong: map_cong` or a lemma like `map_idI` closes such goals.
 - **A looping simp does not fail, it keeps running** (`still_running_possibly_nonterminating`; once interrupted, `exception Interrupt_Breakdown raised`). Do not wait for it (`cancel` stops it): remove the rule you added last, or try plain `simp` / `simp_all` first.
+- **`thm[simplified]` (also `[of …, simplified]`) rewrites with the whole simpset, numerals included:** for `foo: "0 + f (n + 1) = g n"` (nat), `foo[simplified]` is `f (Suc ?n) = g ?n` and `foo[of 1, simplified]` is `f (Suc (Suc 0)) = g (Suc 0)`, so a rule stated with `1` no longer matches the goal. Give the instance explicitly, or name the rules: `[simplified add_0]` / `[unfolded add_0]` use only those (checked).
 - **`Undeclared class: "??.len"`:** the theory defining the class is not imported.
 
 ## Theorem Tagging
