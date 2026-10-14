@@ -141,12 +141,14 @@ object PIDE_MCP_Render {
         else if (i.contains("diagnostic_timed_out_at_seconds"))  // running: the time-out is in the command's line
           s"auto-inspect ($trigger): " + (if (running) "" else scalar(i.getOrElse("outcome", "?")) + "; ") +
             s"`$method`: $uses in the diagnostic"
-        else s"auto-inspect ($trigger): `$method` ${scalar(i.getOrElse("outcome", "?"))}, $uses"
+        else s"auto-inspect ($trigger): `$method`${if (i.contains("scenario")) ":" else ""} ${scalar(i.getOrElse("outcome", "?"))}, $uses"
       val top = str_list(i.getOrElse("top_rules", Nil))
       val suggested = str_list(i.getOrElse("suggested_facts", Nil))
       head :: str_list(i.getOrElse("loops", Nil)).take(1) :::
         Option.when(top.nonEmpty)("top rules: " + top.mkString(", ")).toList :::
         i.get("dominant_rule").map(scalar).toList :::
+        i.get("goal_state").toList.flatMap(g =>
+          s"${i.get("goal_state_for").fold("goal")(f => scalar(f).stripPrefix("the "))}:" :: split_lines(scalar(g)).map("  " + _)) :::
         Option.when(suggested.nonEmpty)("possibly relevant facts" + i.get("suggested_for").fold("")(f => s" (for ${scalar(f)})") +
           ": " + suggested.mkString(", ")).toList :::
         log.toList

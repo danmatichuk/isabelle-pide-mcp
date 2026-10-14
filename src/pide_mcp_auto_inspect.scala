@@ -38,11 +38,28 @@ object PIDE_MCP_Auto_Inspect {
     suggested: List[String] = Nil,
     dominant: Option[String] = None,
     subgoals_left: Option[Int] = None,  // a terminal step: the goals left after its (successful) method
-    timed_out: Option[Int] = None  // the diagnostic stopped at its time limit (seconds)
+    timed_out: Option[Int] = None,  // the diagnostic stopped at its time limit (seconds)
+    scenario: Option[Int] = None,  // a failed terminal step, by the real methods: 1, 2, 3 (see scenario_name)
+    two_methods: Boolean = false,  // `by m1 m2`
+    goal_state: Option[String] = None  // the goal of the scenario (capped)
   ) {
-    // the suggestions are for the goal left by the method, not for the goal before it
+    def scenario_name: Option[String] =
+      scenario.map { case 1 => "method_fails" case 2 => "second_method_fails" case _ => "proof_not_finished" }
+
+    private def subgoals: String = subgoals_left.fold("subgoals")(n => s"$n subgoal${if (n == 1) "" else "s"}")
+
+    // the goal of the scenario, for the suggestions and the goal shown
+    def goal_label: Option[String] =
+      scenario.map {
+        case 1 => if (two_methods) "the goal before the first method" else "the goal before the method"
+        case 2 => "the goal after the first method"
+        case _ => s"the $subgoals left"
+      }
+
+    // the relevance filter looks at subgoal 1
     def suggested_for: Option[String] =
-      subgoals_left.filter(_ > 0).map(n => s"the $n subgoal${if (n == 1) "" else "s"} left")
+      subgoals_left.filter(_ > 1).map(n => s"subgoal 1 of the $n left")
+        .orElse(goal_label).orElse(subgoals_left.filter(_ > 0).map(_ => s"the $subgoals left"))
 
     /* times: of the real run (finished_ms, real_finished_ms; the trigger) or of the diagnostic, the instrumented
        copy of the method, which is slower (probe_seconds, diagnostic_*) */
@@ -62,6 +79,9 @@ object PIDE_MCP_Auto_Inspect {
         JSON_Object.if_proper(outcome.nonEmpty, JSON_Object("outcome" -> outcome1, "top_rules" -> top)) ++
         JSON.optional("dominant_rule" -> dominant) ++
         JSON.optional("subgoals_left" -> subgoals_left) ++
+        JSON.optional("scenario" -> scenario_name) ++
+        JSON.optional("goal_state" -> goal_state) ++
+        JSON.optional("goal_state_for" -> goal_label.filter(_ => goal_state.nonEmpty)) ++
         JSON_Object.if_proper(loops.nonEmpty, JSON_Object("loops" -> loops)) ++
         JSON_Object.if_proper(suggested.nonEmpty, JSON_Object("suggested_facts" -> suggested)) ++
         JSON.optional("suggested_for" -> suggested_for.filter(_ => suggested.nonEmpty)) ++
@@ -169,8 +189,14 @@ object PIDE_MCP_Auto_Inspect {
   /* the text of the trace operation: outcome, loop lines, "subgoals left: N", "counts:" lines, "trace:" lines,
      "suggested:" lines (for the goal left); suggestions: for the goal before the step, used if there are none for
      the goal left */
-  def parse(trigger: String, text: String, session_id: String, suggestions0: List[String] = Nil): Result = {
-    val lines = split_lines(text)
+  def parse(trigger: String, text: String, session_id: String, suggestions0: List[String] = Nil,
+    methods: Int = 0, done: Boolean = false
+  ): Result = {
+    // the goal comes last, with all its lines
+    val (lines, goal_lines) = split_lines(text).span(_ != "goal:")
+    val goal_state = Option.when(goal_lines.length > 1)(
+      PIDE_MCP_Command.cap_goal(cat_lines(goal_lines.drop(1)), PIDE_MCP_Command.State.default_goal_max_lines))
+    val scenario = lines.collectFirst { case l if l.startsWith("scenario: ") => l.stripPrefix("scenario: ").trim.toIntOption }.flatten
     val (head, rest) = lines.span(_ != "counts:")
     val (counts, rest1) = rest.drop(1).span(_ != "trace:")
     val (trace, suggested_left) = rest1.span(_ != "suggested:")
@@ -196,15 +222,43 @@ object PIDE_MCP_Auto_Inspect {
       case _ => None
     }
     val inspected = text.nonEmpty
-    val left_note = subgoals_left.filter(_ > 0 && left_suggestions.nonEmpty).fold("")(n =>
-      s" for the $n subgoal${if (n == 1) "" else "s"} left")
+    val outcome0 = head.headOption.getOrElse("no result").stripPrefix("error: ")
+    // the time limit of the diagnostic: says nothing about the real run, which is not instrumented
+    val timed_out = """did not finish within (\d+) s""".r.findPrefixMatchOf(outcome0).flatMap(_.group(1).toIntOption)
+    val left = subgoals_left.fold("")(n => s"$n subgoal${if (n == 1) "" else "s"} left")
+    val two = methods == 2
+    // a failed terminal step: what the real methods did, rather than the outcome of the diagnostic
+    val outcome =
+      scenario match {
+        case Some(1) => if (two) "the first method fails" else "the method fails"
+        case Some(2) => "the first method applies; the second method fails"
+        case Some(_) =>
+          (if (two) "both methods apply" else if (done) "the last `apply` applies" else "the method applies") +
+            s", but the proof is not finished: $left"
+        case None =>
+          subgoals_left match {
+            case Some(n) if n > 0 && outcome0 == "succeeds" => s"succeeds but does not finish the proof: $left"
+            case _ => timed_out.fold(outcome0)(n => s"diagnostic for slow method timed out at ${n}s")
+          }
+      }
+    val result0 =
+      Result(trigger, if (!inspected) "" else outcome,
+        head.drop(1).filter(_.startsWith("***")), top, uses, None,
+        suggested = suggestions.take(suggest_shown).map(s => s.takeWhile(_ != ':').trim), dominant = dominant,
+        subgoals_left = subgoals_left, timed_out = timed_out, scenario = scenario, two_methods = two,
+        goal_state = goal_state)
+    val goal_for = result0.suggested_for.filter(_ => left_suggestions.nonEmpty)
     val suggested_lines =
       if (suggestions.isEmpty) Nil
-      else (s"possibly relevant facts$left_note (Sledgehammer's relevance filter, most relevant first):" :: suggestions.map("  " + _))
+      else (s"possibly relevant facts${goal_for.fold("")(" for " + _)} (Sledgehammer's relevance filter, most relevant first):" ::
+        suggestions.map("  " + _))
+    val goal_log_lines =
+      goal_state.toList.flatMap(g => s"${result0.goal_label.getOrElse("goal")}:" :: split_lines(g).map("  " + _))
     val log = Option.when(count_lines.nonEmpty || suggestions.nonEmpty)(Exn.result(Tool_Apply_Inspect.write_file(session_id,
       cat_lines(List(s"trigger: $trigger") :::
         (if (!inspected) Nil
-         else ("outcome: " + head.headOption.getOrElse("?")) :: head.drop(1) :::
+         else ("outcome: " + (if (scenario.nonEmpty) outcome else head.headOption.getOrElse("?"))) :: head.drop(1) :::
+          goal_log_lines :::
           ("counts (uses, theorem):" :: count_lines.map("  " + _))) :::
         suggested_lines :::
         (if (!inspected) Nil else "trace (in order, `source: theorem`):" :: trace.drop(1))) + "\n",
@@ -212,19 +266,7 @@ object PIDE_MCP_Auto_Inspect {
       case Exn.Res(path) => Some(path)
       case Exn.Exn(_) => None
     }).flatten
-    val outcome0 = head.headOption.getOrElse("no result").stripPrefix("error: ")
-    // the time limit of the diagnostic: says nothing about the real run, which is not instrumented
-    val timed_out = """did not finish within (\d+) s""".r.findPrefixMatchOf(outcome0).flatMap(_.group(1).toIntOption)
-    val outcome =
-      subgoals_left match {
-        case Some(n) if n > 0 && outcome0 == "succeeds" =>
-          s"succeeds but does not finish the proof: $n subgoal${if (n == 1) "" else "s"} left"
-        case _ => timed_out.fold(outcome0)(n => s"diagnostic for slow method timed out at ${n}s")
-      }
-    Result(trigger, if (!inspected) "" else outcome,
-      head.drop(1).filter(_.startsWith("***")), top, uses, log,
-      suggested = suggestions.take(suggest_shown).map(s => s.takeWhile(_ != ':').trim), dominant = dominant,
-      subgoals_left = subgoals_left, timed_out = timed_out)
+    result0.copy(log = log)
   }
 }
 
@@ -290,25 +332,28 @@ class PIDE_MCP_Auto_Inspector(session: PIDE_MCP_Session) {
   private def kind(snapshot: Document.Snapshot, cmd: Command): Option[String] =
     snapshot.node.syntax.flatMap(_.keywords.kinds.get(cmd.span.name))
 
-  // what to replay for a command, and at which command (the state after it is the goal): None = nothing to replay
-  private def plan(snapshot: Document.Snapshot, cmd: Command, before: List[Command]): Option[(String, Command, String)] = {
-    def at_prev(m: String, note: String = "") = before.lastOption.map(prev => (m, prev, note))
+  /* what to replay for a command, at which command (the state after it is the goal), a note, and for a terminal
+     step its methods (`by m1 m2`: both) for the real replay that tells the scenario: None = nothing to replay */
+  private def plan(snapshot: Document.Snapshot, cmd: Command, before: List[Command])
+    : Option[(String, Command, String, List[String])] = {
+    def at_prev(m: String, ms: List[String] = Nil) = before.lastOption.map(prev => (m, prev, "", ms))
     val ms = methods(cmd.source)
     cmd.span.name match {
-      case "apply" | "proof" | "qed" => ms.headOption.flatMap(at_prev(_))
+      case "apply" | "proof" => ms.headOption.flatMap(at_prev(_))
+      case "qed" => ms.headOption.flatMap(m => at_prev(m, List(m)))
       case "by" => ms match {
-        case List(m1, m2) => at_prev(s"($m1, $m2)")
-        case m :: _ => at_prev(m)
+        case List(m1, m2) => at_prev(s"($m1, $m2)", ms)
+        case m :: _ => at_prev(m, List(m))
         case Nil => None
       }
-      case "." => at_prev("this")
-      case ".." => at_prev("standard")
+      case "." => at_prev("this", List("this"))
+      case ".." => at_prev("standard", List("standard"))
       case "done" =>  // no method of its own: the last `apply` of the proof, on the goal it got
         val proof = before.reverse.takeWhile(c => !kind(snapshot, c).exists(k => Keyword.theory_goal(k) || Keyword.proof_goal(k)))
         proof.find(_.span.name == "apply").flatMap { apply =>
           val i = before.lastIndexOf(apply)
           for (m <- method_text(apply.source); prev <- before.take(i).lastOption)
-          yield (m, prev, s"the last `apply` before it, line ${line_of(snapshot, apply)}")
+          yield (m, prev, s"the last `apply` before it, line ${line_of(snapshot, apply)}", List(m))
         }
       case _ => None
     }
@@ -342,11 +387,13 @@ class PIDE_MCP_Auto_Inspector(session: PIDE_MCP_Session) {
     else if (before.nonEmpty && start(key)) {
       val result = Exn.result {
         val steps = plan(snapshot, cmd, before)
-        val terminal = terminal_commands(cmd.span.name)
-        val trace = steps.flatMap { case (m, at, _) =>
+        // a failed terminal step: the trace also replays its methods without instrumentation (the scenario)
+        val terminal = failed && terminal_commands(cmd.span.name)
+        val trace = steps.flatMap { case (m, at, _, ms) =>
           query(cmd, at, operation,
-            List(m, method_timeout.toString, trace_max.toString) ::: (if (terminal) List(suggest_max.toString) else Nil), key) }
-        // a terminal step whose method succeeds: the trace has the suggestions for the goal left
+            List(m, method_timeout.toString, trace_max.toString) :::
+              (if (terminal && ms.nonEmpty) suggest_max.toString :: ms else Nil), key) }
+        // the trace has the suggestions for the goal of the scenario
         val left = trace.exists(res => split_lines(res.text).contains("suggested:"))
         // the failing goal: the state after the command before the failed one
         val suggestions =
@@ -357,7 +404,8 @@ class PIDE_MCP_Auto_Inspector(session: PIDE_MCP_Session) {
         Option.when(valid(key, cmd) && (trace.nonEmpty || suggestions.nonEmpty)) {
           val trigger1 = trigger + (if (failed && cmd.span.name != "apply") s" `${cmd.span.name}`" else "") +
             note.fold("")(n => s"; replayed $n")
-          parse(trigger1, trace.fold("")(_.text), session.id, suggestions)
+          parse(trigger1, trace.fold("")(_.text), session.id, suggestions,
+            methods = steps.fold(0)(_._4.length), done = cmd.span.name == "done")
             .copy(elapsed = trace.fold(Time.zero)(_.elapsed), method = steps.map(_._1))
         }
       }

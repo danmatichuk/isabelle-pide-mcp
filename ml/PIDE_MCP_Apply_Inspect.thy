@@ -108,12 +108,14 @@ fun report [method_arg, criteria_arg, max_uses_arg, timeout_arg, statements_arg]
 
 (*trace for the automatic inspection of a slow or failed step: every use is counted (every_use), in order.
   args: method, timeout in seconds, maximum number of trace lines, and for a terminal step (by, done, qed, ...) the
-  maximum number of suggested facts.
-  Output: the outcome, loop warnings, for a terminal step whose method succeeds "subgoals left: N" (after the
-  finishing step of a terminal proof), "counts:" with one "  N name<TAB>full name" line per theorem (most used first,
-  with the declarations of the first use; "<TAB>(infrastructure)" appended for sort membership rules), "trace:" with
-  one "  source: name" line per use in order, and when subgoals are left "suggested:" with the facts for the first
-  of them (lines as PIDE_MCP_Suggest.suggest).*)
+  maximum number of suggested facts and its methods (`by m1 m2`: m1, m2; otherwise one).
+  Output: the outcome, loop warnings, for a terminal step "scenario: N" (by the real methods, not instrumented: 1 the
+  first method fails, 2 the second method fails, 3 the methods apply but the finishing step of the terminal proof
+  leaves "subgoals left: N"), "counts:" with one "  N name<TAB>full name" line per theorem (most used first, with the
+  declarations of the first use; "<TAB>(infrastructure)" appended for sort membership rules), "trace:" with one
+  "  source: name" line per use in order, "suggested:" with the facts for the scenario's goal (lines as
+  PIDE_MCP_Suggest.suggest), and last "goal:" with that goal (with markup): before the first method, after it, or
+  the subgoals left.*)
 fun use_key (Apply_Inspect.Theorem (name, _)) = Thm_Name.print name
   | use_key (Apply_Inspect.Fact name) = Thm_Name.print name
   | use_key (Apply_Inspect.Assumption (name, _)) =
@@ -150,10 +152,11 @@ fun trace (method_arg :: timeout_arg :: trace_max_arg :: terminal_args) state =
       let
         val ctxt = Proof.context_of state;
         val pretty_use = Apply_Inspect.pretty_use ctxt;
-        val text =
+        fun read_method s =
           Parse.read_embedded ctxt (Keyword.no_major_keywords (Thy_Header.get_keywords' ctxt))
-            (Scan.many Token.not_eof) (Input.string method_arg)
+            (Scan.many Token.not_eof) (Input.string s)
           |> Method.read ctxt;
+        val text = read_method method_arg;
         val timeout = Time.fromSeconds (the_default 5 (Int.fromString timeout_arg));
         val trace_max = the_default 5000 (Int.fromString trace_max_arg);
 
@@ -193,21 +196,44 @@ fun trace (method_arg :: timeout_arg :: trace_max_arg :: terminal_args) state =
               if Exn.is_interrupt_breakdown exn then "ran out of stack or memory (it may loop)"
               else Exn.reraise exn);
 
-        (*a terminal step whose method succeeds: the goal left after it and the finishing step, by the real method*)
-        val suggest_max = (case terminal_args of [n] => the_default 0 (Int.fromString n) | _ => 0);
-        val left =
-          if suggest_max <= 0 orelse outcome <> "succeeds" then NONE
+        (*a terminal step, by the real methods: (scenario, state for its goal); NONE: no terminal step, a time-out,
+          or the methods finish the proof*)
+        val (suggest_max, terminal_methods) =
+          (case terminal_args of
+            n :: ms => (the_default 0 (Int.fromString n), map read_method ms)
+          | [] => (0, []));
+        fun apply_real txt st =
+          (case Exn.capture (fn () => Timeout.apply timeout (fn () =>
+              Seq.pull (Seq.filter_results (Proof.apply (txt, Position.no_range) st))) ()) () of
+            Exn.Res (SOME (st', _)) => SOME (SOME st')
+          | Exn.Res NONE => SOME NONE
+          | Exn.Exn exn => if Exn.is_interrupt exn then Exn.reraise exn else NONE);
+        val scenario =
+          if suggest_max <= 0 then NONE
           else
-            (case Exn.capture (fn () => Timeout.apply timeout (fn () =>
-                Seq.pull (Seq.filter_results
-                  (Proof.apply (Method.finish_text (SOME text, true), Position.no_range) state))) ()) () of
-              Exn.Res (SOME (state', _)) =>
-                let val n = Thm.nprems_of (#goal (Proof.goal state')) in
-                  if n = 0 then SOME (0, [])
-                  else SOME (n, the_default [] (try (PIDE_MCP_Suggest.suggest suggest_max true) state'))
-                end
-            | Exn.Res NONE => NONE
-            | Exn.Exn exn => if Exn.is_interrupt exn then Exn.reraise exn else NONE);
+            let
+              val (m1, m2) =
+                (case terminal_methods of [] => (text, NONE) | [m] => (m, NONE) | m :: m' :: _ => (m, SOME m'));
+            in
+              (case apply_real m1 state of
+                SOME NONE => SOME (1, state)
+              | SOME (SOME st1) =>
+                  (case apply_real (Method.finish_text (m2, true)) st1 of
+                    SOME NONE => if is_some m2 then SOME (2, st1) else NONE
+                  | SOME (SOME st2) => if Thm.nprems_of (#goal (Proof.goal st2)) > 0 then SOME (3, st2) else NONE
+                  | NONE => NONE)
+              | NONE => NONE)
+            end;
+        val scenario_facts =
+          (case scenario of
+            SOME (_, st) => the_default [] (try (PIDE_MCP_Suggest.suggest suggest_max true) st)
+          | NONE => []);
+        val scenario_goal =
+          (case scenario of
+            SOME (_, st) =>
+              the_list (try (fn () => Pretty.string_of
+                (Goal_Display.pretty_goal (Proof.context_of st) (#goal (Proof.goal st)))) ())
+          | NONE => []);
 
         val sorted =
           Symtab.fold (fn (key, (n, u)) => cons (n, key, u)) (Synchronized.value counts) []
@@ -217,14 +243,19 @@ fun trace (method_arg :: timeout_arg :: trace_max_arg :: terminal_args) state =
       in
         cat_lines
           (outcome :: distinct (op =) (rev (Synchronized.value loops)) @
-            (case left of SOME (n, _) => ["subgoals left: " ^ string_of_int n] | NONE => []) @
+            (case scenario of
+              SOME (k, st) =>
+                ("scenario: " ^ string_of_int k) ::
+                  (if k = 3 then ["subgoals left: " ^ string_of_int (Thm.nprems_of (#goal (Proof.goal st)))] else [])
+            | NONE => []) @
             ["counts:"] @
             map (fn (n, key, u) =>
               "  " ^ string_of_int n ^ " " ^ (if key = "(other rule)" then key else plain (pretty_use u)) ^
                 "\t" ^ key ^ (if is_sort_rule (key, u) then "\t(infrastructure)" else "")) sorted @
             ["trace:"] @ map (fn s => "  " ^ s) (rev trace_lines) @
             (if n_trace > trace_max then ["  ... (" ^ string_of_int (n_trace - trace_max) ^ " more uses)"] else []) @
-            (case left of SOME (_, facts as _ :: _) => "suggested:" :: facts | _ => []))
+            (if null scenario_facts then [] else "suggested:" :: scenario_facts) @
+            (if null scenario_goal then [] else "goal:" :: scenario_goal))
       end
   | trace _ _ = error "Bad arguments";
 
