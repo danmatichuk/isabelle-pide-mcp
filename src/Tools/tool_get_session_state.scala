@@ -149,7 +149,9 @@ class Tool_Get_Session_State extends PIDE_MCP_Tool("get_session_state") {
     false)
   private val format_arg = PIDE_MCP_Render.Output_Format.arg
   private val include_loaded_theories_arg = PIDE_MCP_Tool_Arg.bool_default(
-    "include_loaded_theories", "List loaded theories per session.", false)
+    "include_loaded_theories", "List loaded theories per session, with their source files.", false)
+  private val theory_paths_arg = PIDE_MCP_Tool_Arg.strings_default(
+    "theory_paths", "Session-qualified theory names to resolve to their source files (e.g. before grepping one).", Nil)
   private val include_session_dirs_arg = PIDE_MCP_Tool_Arg.bool_default(
     "include_session_dirs",
     "List the session directories (available libraries; their ROOT files name the sessions for qualified imports).",
@@ -166,7 +168,7 @@ class Tool_Get_Session_State extends PIDE_MCP_Tool("get_session_state") {
   def input_schema: JSON.Object.T = PIDE_MCP_Tool_Schema.input_schema(
     List(PIDE_MCP_Tool_Schema.running_sessions_arg, filter_origins_arg,
       include_commands_running_arg, include_theory_status_arg, include_failures_arg,
-      include_loaded_theories_arg,
+      include_loaded_theories_arg, theory_paths_arg,
       include_session_dirs_arg, include_options_arg, include_statistics_arg, format_arg))
 
   override def annotations: Option[JSON.Object.T] = Some(JSON_Object("readOnlyHint" -> true))
@@ -222,6 +224,10 @@ class Tool_Get_Session_State extends PIDE_MCP_Tool("get_session_state") {
                 Option.when(include_failures)(20)))) ++
           JSON.optional("loaded_theories" ->
             Option.when(include_loaded_theories)(theories.json)) ++
+          JSON_Object.if_proper(theory_paths_arg.get(args).nonEmpty,
+            JSON_Object("theory_paths" -> JSON_Object(theory_paths_arg.get(args).map(theory =>
+              theory -> PIDE_MCP_Theory.source_path(session, theory).getOrElse(
+                "unknown theory (not in this session's directories; qualify it by its session)"))))) ++
           JSON.optional("session_directories" ->
             Option.when(include_session_dirs)(session.directories().map(_.implode))) ++
           Tool_Get_Session_State.options_json(session.options, include_options) ++

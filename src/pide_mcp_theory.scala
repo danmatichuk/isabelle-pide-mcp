@@ -26,9 +26,18 @@ object PIDE_MCP_Theory {
       def entry(name: Document.Node.Name): JSON.Object.T =
         JSON_Object("origin" -> session.origin(name))
       JSON_Object("dynamic" -> dynamic.map(entry),
-        "base_session" -> base_session.map(entry))
+        "base_session" -> base_session.map(name => entry(name) ++
+          JSON.optional("path" -> PIDE_MCP_Theory.source_path(session, name.theory))))
     }
   }
+
+  // the source file of a theory known to the session (also of the base session, whose nodes have no file)
+  def source_path(session: PIDE_MCP_Session, theory: String): Option[String] =
+    Exn.result(session.resources.find_theory_node(theory)) match {
+      case Exn.Res(name) => name.map(_.path.absolute.implode).filter(p => Path.explode(p).is_file)
+      case Exn.Exn(exn) if Exn.is_interrupt(exn) => throw exn
+      case Exn.Exn(_) => None
+    }
 
   object Status {
     def statuses(
