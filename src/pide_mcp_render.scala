@@ -104,11 +104,12 @@ object PIDE_MCP_Render {
       case None => scalar(loc.getOrElse("line", "?"))
     }
     val kinds = str_list(loc.getOrElse("kinds", Nil)).mkString(",")
-    s"line $range  [$kinds]" + loc.get("running_seconds").fold("")(s => s"  (running for ${scalar(s)} s)") +
+    s"line $range  [$kinds]" + loc.get("running_seconds").fold("")(s => s"  (running for ${scalar(s)} s" +
+      loc.get("interrupt_sent_seconds").fold("")(i => s"; interrupt sent ${scalar(i)} s ago, waiting for it to stop") + ")") +
       loc.get("first_message").fold("")(m => "  " + scalar(m))
   }
 
-  private val entry_skip = Set("status", "timing_ms", "source", "kinds")
+  private val entry_skip = Set("status", "timing_ms", "source", "kinds", "interrupt_sent_seconds")
 
   private def command_lines(cmd: Map[String, Any]): List[String] = {
     val source = scalar(cmd.getOrElse("source", "")).linesIterator.toList
@@ -117,7 +118,8 @@ object PIDE_MCP_Render {
     val info = List(
       Option.when(status.nonEmpty)(status),
       Option.when(kinds.nonEmpty && kinds != status)(s"kinds: $kinds"),
-      cmd.get("timing_ms").map(t => s"${scalar(t)} ms")).flatten.mkString("; ")
+      cmd.get("timing_ms").map(t => s"${scalar(t)} ms"),
+      cmd.get("interrupt_sent_seconds").map(i => s"interrupt sent ${scalar(i)} s ago, waiting for it to stop")).flatten.mkString("; ")
     val extra = cmd.toList.filterNot(p => entry_skip.contains(p._1)).flatMap {
       case ("bad", bad) =>
         list(bad).map { b =>

@@ -4,6 +4,7 @@ PIDE MCP NEWS -- history of user-relevant changes
 New in this PIDE MCP version
 ----------------------------
 
+* After `cancel` (or a time limit), a command that has not stopped yet shows `(running for N s; interrupt sent M s ago, waiting for it to stop)` in `get_state` (`interrupt_sent_seconds` in JSON) instead of plain `still running`.
 * `get_session_state`: new `theory_paths` resolves session-qualified theory names to their source files (`HOL-Library.Multiset: .../src/HOL/Library/Multiset.thy`), so an agent that greps does not guess paths; `include_loaded_theories` gives the source file of base-session theories too.
 * Goals inside error and warning messages (`Failed to apply proof method`, `Failed to finish proof`) are capped like goals: `goal_max_lines` in `get_state` (default 100), 40 lines in `edit`'s check, with the same size note and marker.
 * `get_state` (and `edit` with `check`) collapse follow-on problems: after a failing `apply` step or goal statement, the later failing commands of the same proof (they run on the state before the failure) and the `Bad context` failures after a proof left open are counted but listed as one line per cause, `+ N follow-on problem(s) (line a-b) after the failed `apply` at line k`. A new `have`/`show` or theory command starts afresh (structured Isar steps fail independently and stay listed); a range that starts after the failure shows them in full.

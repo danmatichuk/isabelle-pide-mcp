@@ -64,13 +64,17 @@ object PIDE_MCP_Command {
         .map((at, ran) => (Time.now() - at, ran))
 
     // evaluations interrupted by `cancel` or a time limit, with their running time then: they are shown as canceled
-    private val canceled = Synchronized(Map.empty[(Document_ID.Command, Document_ID.Exec), Long])
+    private val canceled = Synchronized(Map.empty[(Document_ID.Command, Document_ID.Exec), (Long, Time)])
 
     def cancel(snapshot: Document.Snapshot, command: Command, running_ms: Long): Unit =
-      eval_exec(snapshot, command).foreach(exec => canceled.change(_ + ((command.id, exec) -> running_ms)))
+      eval_exec(snapshot, command).foreach(exec => canceled.change(_ + ((command.id, exec) -> (running_ms, Time.now()))))
 
     def canceled_ms(snapshot: Document.Snapshot, command: Command): Option[Long] =
-      eval_exec(snapshot, command).flatMap(exec => canceled.value.get((command.id, exec)))
+      eval_exec(snapshot, command).flatMap(exec => canceled.value.get((command.id, exec))).map(_._1)
+
+    // how long ago the interrupt was sent (for a command that has not stopped yet)
+    def interrupt_sent_ago(snapshot: Document.Snapshot, command: Command): Option[Time] =
+      eval_exec(snapshot, command).flatMap(exec => canceled.value.get((command.id, exec))).map(p => Time.now() - p._2)
 
     def elapsed_ms(snapshot: Document.Snapshot, command: Command): Long =
       eval_exec(snapshot, command).flatMap(exec => since.value.get((command.id, exec)))
@@ -478,6 +482,10 @@ object PIDE_MCP_Command {
     }
     lazy val timing_ms: Long = cmd_status.timings.sum(Date.now()).ms
     // how long the command has been running, also for a forked proof
+    // interrupted by `cancel` or a time limit, but still running: seconds since the interrupt was sent
+    lazy val interrupt_sent_seconds: Option[Long] =
+      if (status.contains(Status.running)) Running_Clock.interrupt_sent_ago(snapshot, cmd).map(_.ms / 1000) else None
+
     lazy val running_ms: Long =
       if (status.contains(Status.running)) timing_ms max Running_Clock.elapsed_ms(snapshot, cmd) else 0L
     lazy val errors: Int = results.count(Protocol.is_error)
@@ -537,6 +545,7 @@ object PIDE_MCP_Command {
         Option.when(end_line > line)("end_line" -> end_line),
         Some("kinds" -> kinds),
         Option.when(status.contains(Status.running))("running_seconds" -> running_ms / 1000),
+        interrupt_sent_seconds.map("interrupt_sent_seconds" -> _),
         first_message().filter(_.nonEmpty).map("first_message" -> _)))
     }
 
@@ -552,6 +561,7 @@ object PIDE_MCP_Command {
         List(
           Some("status" -> status),
           Some("timing_ms" -> (timing_ms max running_ms)),
+          interrupt_sent_seconds.map("interrupt_sent_seconds" -> _),
           Some("source" -> source),
           outside_hint.map("hint" -> _),
           proper_list(bad).map("bad" -> _)) :::
