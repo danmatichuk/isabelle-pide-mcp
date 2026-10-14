@@ -7,6 +7,10 @@ metadata:
 
 Proof search, automation and concept search in Isabelle. Make sure the PIDE MCP works first (`pide-mcp` skill, "Before You Start"); if it does not, tell the user instead of working around it with batch builds.
 
+## Keep the Target Statement Intact
+
+**Never delete or re-type the statement of the lemma you were asked to prove.** Keep it in place (with `sorry` if needed) and add helper lemmas above it with `edit`. Experiments that restructure the file belong in a `create_scratch` theory, not in a rewrite of the whole file (Write or a full-file script). If the statement must leave the file for a while, copy its exact text first and paste it back verbatim: a re-typed statement can drift (binder names, types, notation, parentheses) and then proves something else.
+
 ## Closing a Goal
 
 **When a goal does not close with an obvious guess:**
