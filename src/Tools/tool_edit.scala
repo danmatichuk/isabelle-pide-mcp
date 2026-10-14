@@ -244,6 +244,7 @@ class Tool_Edit extends PIDE_MCP_Tool("edit") {
       val opt_start_line = PIDE_MCP_Tool_Schema.opt_start_line_arg.get(args)
       val opt_end_line = PIDE_MCP_Tool_Schema.opt_end_line_arg.get(args)
       val reloads = PIDE_MCP_Tool_Util.reload_estimate(session, node_name)
+      val snapshot_before = Exn.result(session.snapshot()) match { case Exn.Res(s) => Some(s); case _ => None }
       val (_, count, edited_range, ml_blocked, ml_note) = Tool_Edit.read_update_edit(
         session, mode, node_name, text, opt_start_line, opt_end_line, old_text,
         edit_all = edit_all, progress = progress, ml_check = check_ml_arg.get(args))
@@ -256,14 +257,23 @@ class Tool_Edit extends PIDE_MCP_Tool("edit") {
       val time_limit =
         if (cancel_after > 0 && count > 0 && ml_blocked.isEmpty && node_name.is_theory) edited_range else None
       for ((from, to) <- time_limit) Tool_Cancel.cancel_after(session, node_name, from, to, cancel_after)
+      // the slowest commands this edit makes Isabelle run again (from their previous run)
+      val slow =
+        if (count == 0) Nil
+        else for {
+          before <- snapshot_before.toList
+          (from, _) <- edited_range.toList
+          entry <- PIDE_MCP_Tool_Util.slow_rerun(session, before, node_name, from)
+        } yield entry
       val checked =
         if (check_arg.get(args)) check_state(session, node_name, check_wait_arg.get(args), progress, edited_range) else None
       JSON_Object("status" -> status, "description" -> description) ++
         JSON.optional("time_limit" -> time_limit.map { case (from, to) =>
           s"commands of lines $from-$to that run longer than $cancel_after s are cancelled" }) ++
         JSON.optional("provisional" -> checked.flatMap(_._1)) ++
-        (if (count > 0) JSON_Object("reprocessed" -> reloads.fold(
-          reason => JSON_Object("unavailable" -> reason), identity)) else JSON_Object()) ++
+        (if (count > 0) JSON_Object("reprocessed" -> (reloads.fold(
+          reason => JSON_Object("unavailable" -> reason), identity) ++
+          JSON_Object.if_proper(slow.nonEmpty, JSON_Object("slowest_commands" -> slow)))) else JSON_Object()) ++
         JSON.optional("state" -> checked.map(_._2))
     }
 

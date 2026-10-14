@@ -127,7 +127,7 @@ class Tool_Cancel extends PIDE_MCP_Tool("cancel") {
         val doc = Line.Document(snapshot.node.source)
         val recent = PIDE_MCP_Util.text_range(doc, start_line, end_line min doc.lines.length).toList.flatMap { range =>
           PIDE_MCP_Command.State.commands(snapshot, Some(range)).toList.flatMap { state =>
-            PIDE_MCP_Command.Running_Clock.stopped_ago(snapshot, state.cmd).map { case (ago, ran) =>
+            PIDE_MCP_Command.Running_Clock.stopped_ago(snapshot, state.cmd).filter(_._1 < Time.seconds(60)).map { case (ago, ran) =>
               val kinds = state.problem_kinds
               s"line ${doc.position(state.command_range.start).line1} (`${state.cmd.span.name}`) finished " +
                 f"${ago.seconds}%.1f s ago after ${ran.seconds}%.1f s: " +

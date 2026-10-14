@@ -45,6 +45,7 @@ object PIDE_MCP_Command {
     // evaluations that stopped running recently: when, and after how long (for `cancel` that comes too late)
     private val stopped = Synchronized(Map.empty[(Document_ID.Command, Document_ID.Exec), (Time, Time)])
     private val stopped_keep = Time.seconds(60)
+    private val stopped_max = 2000
 
     def observe(snapshot: Document.Snapshot, commands: Set[Command]): Unit = {
       val now = Time.now()
@@ -57,8 +58,13 @@ object PIDE_MCP_Command {
         }
         (map.filterNot(p => map1.contains(p._1)), map1)
       }
+      // short runs are kept for a minute (for `cancel`), runs of a second or more longer (for edit's slowest commands)
       if (ended.nonEmpty || stopped.value.nonEmpty)
-        stopped.change(m => m.filter(p => now - p._2._1 < stopped_keep) ++ ended.map((k, t) => k -> (now, now - t)))
+        stopped.change { m =>
+          val m1 = m.filter(p => now - p._2._1 < stopped_keep || p._2._2 >= Time.seconds(1)) ++
+            ended.map((k, t) => k -> (now, now - t))
+          if (m1.size <= stopped_max) m1 else m1.toList.sortBy(_._2._1.ms).takeRight(stopped_max).toMap
+        }
     }
 
     // stopped running this long ago, after running for so long

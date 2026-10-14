@@ -253,15 +253,7 @@ object PIDE_MCP_Tool_Util {
         }
       if (roots.isEmpty) Left("no loaded theory loads this file")
       else {
-        val candidates = dynamic_theories.map(_._1)
-        var affected = roots.toSet
-        var more = List.empty[Document.Node.Name]
-        while ({
-          more = candidates.filter(name => !affected(name) && nodes(name).header.imports.exists(affected))
-          affected ++= more
-          more.nonEmpty
-        }) ()
-        val names = affected.toList
+        val names = affected_theories(snapshot, roots, dynamic_theories.map(_._1))
         val statuses = PIDE_MCP_Theory.Status.statuses(session, snapshot, names)
         Right(JSON_Object(
           "theories" -> names.length,
@@ -271,6 +263,59 @@ object PIDE_MCP_Tool_Util {
     } match {
       case Exn.Res(result) => result
       case Exn.Exn(_) => Left("the file was not loaded before this edit")
+    }
+
+  // the roots and the loaded theories that import them (transitively)
+  def affected_theories(
+    snapshot: Document.Snapshot,
+    roots: List[Document.Node.Name],
+    candidates: List[Document.Node.Name]
+  ): List[Document.Node.Name] = {
+    val nodes = snapshot.version.nodes
+    var affected = roots.toSet
+    var more = List.empty[Document.Node.Name]
+    while ({
+      more = candidates.filter(name => !affected(name) && nodes(name).header.imports.exists(affected))
+      affected ++= more
+      more.nonEmpty
+    }) ()
+    affected.toList
+  }
+
+  /* The slowest commands an edit makes Isabelle run again, by their time before the edit (snapshot before it):
+     those from the edited line on in the edited theory and all of the theories importing it; at least floor_ms. */
+  val slow_rerun_floor_ms: Long = 2000
+
+  def slow_rerun(
+    session: PIDE_MCP_Session,
+    before: Document.Snapshot,
+    node_name: Document.Node.Name,
+    from_line: Int,
+    limit: Int = 3
+  ): List[String] =
+    Exn.result {
+      val nodes = before.version.nodes
+      val candidates = nodes.iterator.collect { case (name, node)
+        if name.is_theory && !session.is_base_session_theory(name) && PIDE_MCP_Util.is_loaded_dynamic(node) => name }.toList
+      val names = if (node_name.is_theory) affected_theories(before, List(node_name), candidates) else Nil
+      val timed = names.flatMap { name =>
+        val snapshot = before.switch(name)
+        val doc = Line.Document(snapshot.node.source)
+        snapshot.node.command_iterator().filterNot(_._1.is_ignored).flatMap { case (cmd, start) =>
+          val line = doc.position(start).line1
+          val status = PIDE_MCP_Command.status(snapshot, cmd)
+          // PIDE times evaluations, not forked proofs: the running clock remembers how long those ran
+          val ms = status.timings.sum(Date.now()).ms max
+            PIDE_MCP_Command.Running_Clock.stopped_ago(snapshot, cmd).fold(0L)(_._2.ms)
+          Option.when((name != node_name || line >= from_line) && ms >= slow_rerun_floor_ms)(
+            (ms, (if (name == node_name) "" else session.origin(name) + " ") + s"line $line (${ms / 1000} s)"))
+        }
+      }
+      timed.sortBy(-_._1).take(limit).map(_._2)
+    } match {
+      case Exn.Res(list) => list
+      case Exn.Exn(exn) if Exn.is_interrupt(exn) => throw exn
+      case Exn.Exn(_) => Nil
     }
 
   // failed or sorry'd commands before the requested range: later commands may rest on them although they show finished
