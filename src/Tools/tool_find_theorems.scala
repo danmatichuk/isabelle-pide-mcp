@@ -48,14 +48,16 @@ object Tool_Find {
     val line = Line.Document(snapshot.node.source).position(offset).line1
     val default_line = Option.when(start_line_arg.get(args).isEmpty)(line)
     // a pattern is read with the syntax at the position (e.g. the notation of included bundles): say where that was
+    val wrong_context = "; wrong context?"
     val parse_failed =
       List("Inner syntax error", "Inner lexical error", "Type unification failed", "Undefined constant").exists(result.text.contains)
     val note =
       (if (result.outcome == PIDE_MCP_Query.Outcome.timeout)
         "\n(query cancelled after the timeout: results may be incomplete)" else "") +
       default_line.fold("")(line => s"\n(searched at line $line, the default: end of file" +
-        default_note.fold("")("; " + _) + "; pass start_line to search elsewhere)") +
-      (if (parse_failed && default_line.isEmpty) s"\n(searched at line $line)" else "") +
+        default_note.fold("")("; " + _) + "; pass start_line to search elsewhere" +
+        (if (parse_failed) wrong_context else "") + ")") +
+      (if (parse_failed && default_line.isEmpty) s"\n(searched at line $line$wrong_context)" else "") +
       (if (result.text.contains("Unknown context"))
         "\n(Unknown context: the position has no theory context, e.g. it is after the theory's `end` or its command failed: " +
           "pass a start_line inside the theory, at a processed command)" else "")
