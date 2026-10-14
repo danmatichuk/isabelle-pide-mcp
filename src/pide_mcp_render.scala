@@ -202,7 +202,8 @@ object PIDE_MCP_Render {
         val shown = list(sec(key)).map(obj)
         val total = scalar(sec.getOrElse("count", shown.length))
         "" :: s"$title (${shown.length} of $total):" ::
-          shown.flatMap(c => if (is_full(c)) command_lines(c) else List(location_line(c)))
+          (shown.flatMap(c => if (is_full(c)) command_lines(c) else List(location_line(c))) :::
+            str_list(sec.getOrElse("follow_on", Nil)).map("+ " + _))
       }
     val synced = state.get("external_edits_synced").toList.flatMap { x =>
       val sync = obj(x)

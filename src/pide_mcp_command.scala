@@ -362,6 +362,10 @@ object PIDE_MCP_Command {
       var total_timing_ms = 0L
       var count = 0
       var problems = 0
+      // follow-on problems: later commands of a proof after its first failure (they run on the state before it), and
+      // `Bad context` after a proof left open; listed as one line per cause instead of one entry each
+      var failed_proof: Option[(Int, String)] = None  // line and name of the first failure of the current proof
+      val follow_on = mutable.LinkedHashMap.empty[(Int, String), mutable.ListBuffer[Int]]
       for (state <- states) {
         if (detail == Detail.full && limit.forall(count < _)) returned_commands += state.json(doc, opts)
         count += 1
@@ -377,13 +381,30 @@ object PIDE_MCP_Command {
           }
           if (open_cause.nonEmpty) open_count += 1
         }
-        previous = Some((doc.position(state.command_range.start).line1, state.cmd.span.name))
+        val line = doc.position(state.command_range.start).line1
+        val last_failure = failed_proof
+        // a new statement (`lemma`, `have`, `show`, ...) is checked on its own: a failure before it does not cascade into it
+        if (state.is_theory_command || state.kind.exists(Keyword.proof_goal)) failed_proof = None
+        previous = Some((line, state.cmd.span.name))
         val problem_kinds = state.problem_kinds
-        if (problem_kinds.nonEmpty) {
+        val failure = problem_kinds.exists(Set(Status.failed, "errors"))
+        val cause =
+          if (problem_kinds.isEmpty || first_problem.isEmpty) None
+          else if (state.bad_context) last_failure.orElse(open_cause.flatten)
+          else failed_proof
+        if (problem_kinds.nonEmpty && cause.nonEmpty) {
           problems += 1
+          follow_on.getOrElseUpdate(cause.get, new mutable.ListBuffer[Int]) += line
+        }
+        else if (problem_kinds.nonEmpty) {
+          problems += 1
+          // an `apply` step (or a goal statement) that fails leaves the later steps of its proof on the state before it
+          if (failure && failed_proof.isEmpty &&
+              state.kind.exists(k => Keyword.prf_script(k) || Keyword.theory_goal(k) || Keyword.proof_goal(k)))
+            failed_proof = Some((line, state.cmd.span.name))
           if (first_problem.isEmpty && problem_kinds.exists(Set(Status.failed, "errors", "errors_outside_range")))
             first_problem = Some(state.location_json(doc, problem_kinds))
-          if (detail != Detail.summary && problems <= problems_limit) {
+          if (detail != Detail.summary && returned_problems.length < problems_limit) {
             returned_problems += (
               if (detail == Detail.full) state.json(doc, opts) + ("kinds" -> problem_kinds)
               else state.location_json(doc, problem_kinds))
@@ -403,7 +424,12 @@ object PIDE_MCP_Command {
         ("problems" -> (JSON_Object("count" -> problems) ++
           JSON_Object.if_proper(detail != Detail.summary,
             JSON_Object("count_returned" -> returned_problems.length,
-              "problems" -> returned_problems.toList)))) +
+              "problems" -> returned_problems.toList)) ++
+          JSON_Object.if_proper(follow_on.nonEmpty,
+            JSON_Object("follow_on" -> follow_on.toList.map { case ((cause, name), lines) =>
+              s"${lines.length} follow-on problem(s) (line ${PIDE_MCP_Util.line_ranges(lines.toList)}) after the failed `$name` at line $cause: " +
+                "fix that first, or start the range after it to see them"
+            })))) +
         ("commands" -> (JSON_Object("count" -> count) ++
           JSON_Object.if_proper(detail == Detail.full,
             JSON_Object("count_returned" -> returned_commands.length,
@@ -466,6 +492,10 @@ object PIDE_MCP_Command {
           Option.when(warnings > 0)("warnings")).flatten
 
     // the command failed only because the proof before it was left open ("Bad context for command ... using reset state")
+    // a theory-level command (`lemma`, `definition`, ...), not a command inside a proof
+    lazy val kind: Option[String] = snapshot.node.syntax.flatMap(_.keywords.kinds.get(cmd.span.name))
+    lazy val is_theory_command: Boolean = kind.forall(Keyword.theory)
+
     lazy val bad_context: Boolean =
       results.exists(r => Protocol.is_error(r) && PIDE_MCP_Util.elem_body_plain_text(r).contains("Bad context for command"))
 

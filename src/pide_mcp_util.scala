@@ -9,6 +9,13 @@ package isabelle.pide.mcp
 import isabelle._
 
 object PIDE_MCP_Util {
+  // "3-5, 9" for the lines 3, 4, 5, 9
+  def line_ranges(lines: List[Int]): String =
+    lines.distinct.sorted.foldLeft(List.empty[(Int, Int)]) {
+      case ((a, b) :: rest, l) if l == b + 1 => (a, l) :: rest
+      case (acc, l) => (l, l) :: acc
+    }.reverse.map { case (a, b) => if (a == b) a.toString else s"$a-$b" }.mkString(", ")
+
   def capture_failures[A](args: IterableOnce[A], run: A => Unit): Iterator[(A, Throwable)] =
     args.iterator.flatMap(arg =>
       Exn.capture(run(arg)) match {
