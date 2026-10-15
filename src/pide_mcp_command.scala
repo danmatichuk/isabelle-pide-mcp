@@ -32,6 +32,45 @@ object PIDE_MCP_Command {
   def status(snapshot: Document.Snapshot, command: Command): Document_Status.Command_Status =
     snapshot.state.command_status(snapshot.version, command)
 
+  def eval_exec(snapshot: Document.Snapshot, command: Command): Option[Document_ID.Exec] =
+    snapshot.state.assignments.get(snapshot.version.id).flatMap(_.command_execs.get(command.id)).flatMap(_.headOption)
+
+  /* Since when an evaluation of a command runs: PIDE times the evaluation itself, but not a forked proof
+     (`by` of a lemma), which then shows 0 ms however long it runs. Fed by each session's commands_changed. */
+  object Running_Clock {
+    private val since = Synchronized(Map.empty[(Document_ID.Command, Document_ID.Exec), Time])
+
+    def observe(snapshot: Document.Snapshot, commands: Set[Command]): Unit = {
+      val now = Time.now()
+      val updates = commands.toList.map(cmd =>
+        (cmd.id, eval_exec(snapshot, cmd), snapshot.node_name.is_theory && status(snapshot, cmd).is_running))
+      since.change(map => updates.foldLeft(map) {
+        case (m, (id, Some(exec), true)) => if (m.contains((id, exec))) m else m + ((id, exec) -> now)
+        case (m, (id, _, _)) => m.filterNot(_._1._1 == id)
+      })
+    }
+
+    def elapsed_ms(snapshot: Document.Snapshot, command: Command): Long =
+      eval_exec(snapshot, command).flatMap(exec => since.value.get((command.id, exec)))
+        .fold(0L)(t => (Time.now() - t).ms)
+
+    // evaluations interrupted by the step time limit, with their running time then: they are shown as canceled
+    private val canceled = Synchronized(Map.empty[(Document_ID.Command, Document_ID.Exec), (Long, Time)])
+    private val canceled_max = 2000
+
+    def cancel(snapshot: Document.Snapshot, command: Command, running_ms: Long): Unit =
+      eval_exec(snapshot, command).foreach(exec => canceled.change { m =>
+        (if (m.size >= canceled_max) m.toList.sortBy(_._2._2.ms).drop(m.size - canceled_max + 1).toMap else m) +
+          ((command.id, exec) -> (running_ms, Time.now())) })
+
+    def canceled_ms(snapshot: Document.Snapshot, command: Command): Option[Long] =
+      eval_exec(snapshot, command).flatMap(exec => canceled.value.get((command.id, exec))).map(_._1)
+
+    // how long ago the interrupt was sent (for a command that has not stopped yet)
+    def interrupt_sent_ago(snapshot: Document.Snapshot, command: Command): Option[Time] =
+      eval_exec(snapshot, command).flatMap(exec => canceled.value.get((command.id, exec))).map(p => Time.now() - p._2)
+  }
+
   private def status_list(status: Document_Status.Command_Status): List[String] =
     List(
       Option.when(status.is_unprocessed)(Status.unprocessed),
@@ -263,13 +302,28 @@ object PIDE_MCP_Command {
     private def has_markup(elements: Markup.Elements): Boolean =
       snapshot.select(range, elements, _ => { case _ => Some(()) }).nonEmpty
 
-    lazy val status: List[String] =
-      status_list(cmd_status).filter {
+    // interrupted at the step time limit (pide_mcp_step_time_limit), not once it runs again
+    lazy val interrupted_at: Option[Double] =
+      Option.when(!cmd_status.is_running && Running_Clock.canceled_ms(snapshot, cmd).nonEmpty)(())
+        .flatMap(_ => PIDE_MCP_Step_Limit.interrupted_at(snapshot, cmd))
+    // interrupted, but still running: seconds since the interrupt was sent
+    lazy val interrupt_sent_seconds: Option[Long] =
+      if (cmd_status.is_running) Running_Clock.interrupt_sent_ago(snapshot, cmd).map(_.ms / 1000) else None
+    // running without the limit (retry_without_limit)
+    lazy val no_time_limit: Boolean = PIDE_MCP_Step_Limit.is_unlimited(snapshot, cmd)
+
+    lazy val status: List[String] = {
+      val list = status_list(cmd_status).filter {
         case Status.warned => has_markup(Markup.Elements(Markup.WARNING, Markup.LEGACY))
         case Status.failed => has_markup(Markup.Elements(Markup.FAILED, Markup.ERROR))
         case _ => true
       }
-    lazy val timing_ms: Long = cmd_status.timings.sum(Date.now()).ms
+      if (interrupted_at.nonEmpty && !list.contains(Status.canceled)) list :+ Status.canceled else list
+    }
+    // the real run, also for a forked proof (which PIDE does not time) while it runs
+    lazy val timing_ms: Long =
+      cmd_status.timings.sum(Date.now()).ms max
+        (if (cmd_status.is_running) Running_Clock.elapsed_ms(snapshot, cmd) else 0L)
     lazy val errors: Int = results.count(Protocol.is_error)
     lazy val warnings: Int = results.count(Protocol.is_warning_or_legacy)
     lazy val bad: List[JSON.Object.T] = bad_json(snapshot, range)
@@ -281,6 +335,10 @@ object PIDE_MCP_Command {
         List(
           Some("status" -> status),
           Some("timing_ms" -> timing_ms),
+          interrupted_at.map("interrupted_at_limit_seconds" -> _),
+          interrupted_at.map(_ => "hint" -> PIDE_MCP_Step_Limit.retry_note(source_line)),
+          interrupt_sent_seconds.map("interrupt_sent_seconds" -> _),
+          Option.when(no_time_limit)("no_time_limit" -> true),
           Some("source" -> PIDE_MCP_Util.numbered_lines(source, source_line)),
           proper_list(bad).map("bad" -> _)) :::
         message_entries(results.iterator, Message_Kind.important) :::

@@ -23,3 +23,6 @@ option pide_mcp_tools : string = "*" for pide_mcp
 
 option pide_mcp_output_format : string = "yaml" for pide_mcp
   -- "default format of tool results: yaml (readable text, content only) or json (structured content); the format argument of each tool overrides it"
+
+option pide_mcp_step_time_limit : real = 5.0 for pide_mcp
+  -- "time limit (seconds) for the real run of a proof step (apply, by, proof, qed, done, ., ..): a step that reaches it is interrupted and shown as canceled; retry_without_limit runs it again without the limit; 0: no limit"

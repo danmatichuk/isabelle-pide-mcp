@@ -4,6 +4,11 @@ PIDE MCP NEWS -- history of user-relevant changes
 New in this PIDE MCP version
 ----------------------------
 
+* Time limit for proof steps: a step (`apply`, `by`, `proof`, `qed`, `done`, `.`, `..`) whose real run (also of a forked proof) reaches
+    the new option `pide_mcp_step_time_limit` (default 5 s; 0: no limit) is interrupted. `get_state` shows it as `canceled`, with
+    `interrupted_at_limit_seconds` and a hint. The new tool `retry_without_limit` runs such a step again, once, without the limit
+    (`no_time_limit`); an edit of the step brings the limit back. The `timing_ms` of a running forked proof is its running time
+    (before: 0).
 * `get_state`, `get_session_state`, and `find_entities` pick up edits of loaded files made on disk outside of the server (scripts, other editors, the agent's
     own file tools) before they answer, so no `read` is needed after such edits. Only the changed line spans are sent to PIDE. The result lists the
     synced files under `external_edits_synced`, with the changed lines; after syncing, `get_state` waits up to 5 s for the changed lines to be processed.

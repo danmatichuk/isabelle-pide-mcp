@@ -172,7 +172,23 @@ class PIDE_MCP_Session private(
   private val overlay_updates =
     Consumer_Thread.fork[() => Unit](s"pide_mcp_overlays_$id", daemon = true) { e => e(); true }
 
+  // the real run of forked proofs (PIDE_MCP_Command.Running_Clock), for the step time limit and get_state
+  private val running_consumer =
+    Session.Consumer[Session.Commands_Changed]("pide_mcp_running") {
+      case changed =>
+        val snapshot = session.snapshot()
+        for (name <- changed.nodes) {
+          PIDE_MCP_Command.Running_Clock.observe(snapshot.switch(name),
+            changed.commands.filter(_.node_name == name))
+        }
+    }
+  session.commands_changed += running_consumer
+
+  private val step_limit = new PIDE_MCP_Step_Limit(this)
+
   def stop(): Process_Result = {
+    step_limit.stop()
+    session.commands_changed -= running_consumer
     session.runtime_statistics -= statistics_consumer
     val result = session.stop()
     overlay_updates.shutdown()
@@ -439,6 +455,18 @@ class PIDE_MCP_Session private(
       }
       update(synced.flatMap(_._2))
       synced.map(_._1).filter(_.changed_lines > 0)
+    }
+
+  /* Let PIDE evaluate a command again although its text is unchanged (e.g. after it was interrupted): its text is
+     removed and inserted again, in the prover's copy only (the file is not touched), which makes it a new command. */
+  def reevaluate(node_name: Document.Node.Name, range: Text.Range, progress: Progress): Unit =
+    with_lock(progress) {
+      val node = tip_version(progress).nodes(node_name)
+      val text = node.source
+      val model = Node_Model(node_name, node, text, node.text_perspective)
+      val source = range.substring(text)
+      update(model.node_edits(model.node_header,
+        List(Text.Edit.remove(range.start, source), Text.Edit.insert(range.start, source)), model.node_perspective))
     }
 
   private def hide_edits(

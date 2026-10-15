@@ -60,6 +60,7 @@ Important rules (further elaborated in the sections below):
 ### Time Management
 - **Avoid adding large amounts of new material at once, as it makes it hard to identify the source of errors and nontermination.**
 - **Proof methods typically terminate in less than 5 seconds.**
+- **A proof step (`apply`, `by`, `proof`, `qed`, `done`, `.`, `..`) is interrupted when its real run reaches 5 s:** `get_state` shows it as `canceled` with `interrupted_at_limit_seconds`, and a step that does not run in parallel (not the `by` of a lemma) holds up the commands after it until you edit it. Replace the method by a faster one (fewer rules, `simp only:`, an explicit rule, a split goal). Only for a step that really needs longer, run it once without the limit with `retry_without_limit` (origin and the step's line); an edit of the step stops it and brings the limit back. Some ML code does not react to interrupts. `try0`, `sledgehammer` and other diagnostic commands have no limit.
 - If commands take longer, be suspicious! Only if you are very confident that a proof legitimately needs more time wait a bit longer. Short waits typically let you move faster!
 - **If `get_state` shows `> 0` running commands for more than ~30 seconds, suspect non-termination** (a loop or overly expensive computation). Restructure rather than wait.
 - **Use `get_session_state` to show the progress and currently running commands across all theories.**
