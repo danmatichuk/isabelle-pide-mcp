@@ -61,7 +61,9 @@ To interactively explore the agent's changes, you may also run an Isabelle/jEdit
     git clone <THIS_REPOSITORY>
     cd isabelle-pide-mcp
     git checkout <BRANCH>
+    git submodule update --init
     ```
+    The submodule `deps/apply_inspect` is the [apply_inspect](https://github.com/danmatichuk/apply_inspect) command, which shows the goal state reached by a proof step that was interrupted at the time limit.
     **Note for Windows users:** make sure that `etc/settings` uses `LF` line breaks.
 
 3. Register this project as an Isabelle component by inserting the file path to this project into the command below.
