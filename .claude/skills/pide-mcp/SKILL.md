@@ -52,6 +52,7 @@ Important rules (further elaborated in the sections below):
 - Reading unloaded theories with other tools (e.g. grepping the AFP) is fine.
 - **Avoid absolute file path imports for theories. Use session-qualified theory names for sessions available to you.** See `get_session_state` on how to find session qualifiers.
 - **`edit` reads its file from disk before matching `old_text`.** If `old_text` is rejected as not found, the text really differs from what you expect (e.g. a human edited it): `read` the range again. Symbols match in either form (`\<rightarrow>` or `→`); lines outside the edited range keep their bytes on disk.
+- `get_state` on a file that is not loaded yet (e.g. one you just wrote with your own tools) loads it and waits up to 10 s for it.
 
 ### After Every Edit
 1. **Check for errors/unfinished/successful commands after edits (also with other tools) with `get_state`**, which synchronises disk edits first.

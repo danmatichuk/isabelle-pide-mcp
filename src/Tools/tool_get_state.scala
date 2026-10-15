@@ -14,7 +14,8 @@ class Tool_Get_State extends PIDE_MCP_Tool("get_state") {
       "For non-theory files, the response has a single command entry derived from the command that loaded it in the respective theory. " +
       PIDE_MCP_Tool_Schema.implicit_load_file + " " +
       PIDE_MCP_Tool_Schema.sync_disk_edits + " " +
-      s"After such a sync it waits up to ${Tool_Get_State.sync_wait_seconds.toInt} s for the changed lines to be processed."
+      s"After such a sync it waits up to ${Tool_Get_State.sync_wait_seconds.toInt} s for the changed lines to be processed, " +
+      s"and up to ${Tool_Get_State.load_wait_seconds.toInt} s for a file that was not loaded yet."
 
   private val include_types_arg = PIDE_MCP_Tool_Arg.bool_default(
     "include_types",
@@ -57,12 +58,24 @@ class Tool_Get_State extends PIDE_MCP_Tool("get_state") {
       val synced = PIDE_MCP_Tool_Util.sync_disk_edits(session, progress)
       val opt_start_line = PIDE_MCP_Tool_Schema.opt_start_line_arg.get(args)
       val opt_end_line = PIDE_MCP_Tool_Schema.opt_end_line_arg.get(args)
-      // the results of the old text are gone, the new text is not processed yet
-      if (synced.exists(_._1.contains(node_name)))
+      // a file that is not loaded yet (e.g. just written by the agent's own tools) is loaded and waited for
+      val loaded = Exn.result(session.node_snapshot(node_name)) match {
+        case Exn.Res(_) => true
+        case Exn.Exn(exn) if Exn.is_interrupt(exn) => throw exn
+        case Exn.Exn(_) => false
+      }
+      val load_start = Time.now()
+      PIDE_MCP_Tool_Util.require_loaded_origin_snapshot(session, node_name, progress,
+        wait_seconds = if (loaded) 0 else Tool_Get_State.load_wait_seconds)
+      // the results of the old text are gone, the new text is not processed yet; a new file is not processed yet
+      if (!loaded || synced.exists(_._1.contains(node_name))) {
+        val seconds =
+          if (loaded) Tool_Get_State.sync_wait_seconds
+          else (Tool_Get_State.load_wait_seconds - (Time.now() - load_start).seconds) max 0.0
         PIDE_MCP_Tool_Util.await_processed(session, node_name, opt_start_line.getOrElse(1),
-          opt_end_line.getOrElse(Int.MaxValue), Tool_Get_State.sync_wait_seconds, progress)
-      val snapshot =
-        PIDE_MCP_Tool_Util.require_loaded_origin_snapshot(session, node_name, progress)
+          opt_end_line.getOrElse(Int.MaxValue), seconds, progress)
+      }
+      val snapshot = session.node_snapshot(node_name)
       val doc = Line.Document(snapshot.node.source)
       val (start_line, end_line) =
         PIDE_MCP_Tool_Util.resolve_lines(opt_start_line, opt_end_line, doc.lines.length)
@@ -79,6 +92,7 @@ class Tool_Get_State extends PIDE_MCP_Tool("get_state") {
 
 object Tool_Get_State {
   val sync_wait_seconds: Double = 5.0
+  val load_wait_seconds: Double = 10.0
 }
 
 class Tools_Get_State extends PIDE_MCP_Tools(new Tool_Get_State)

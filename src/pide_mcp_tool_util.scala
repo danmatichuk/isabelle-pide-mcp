@@ -56,24 +56,42 @@ object PIDE_MCP_Tool_Util {
   def origin_param(session: PIDE_MCP_Session, args: JSON.Object.T): Document.Node.Name =
     session.node_name(PIDE_MCP_Tool_Schema.origin_arg.get(args))
 
+  /* The snapshot of a loaded origin; an origin that is not loaded yet is loaded. wait_seconds: wait this long for
+     the snapshot of a newly loaded (or not yet processed) origin instead of failing at once. */
   def require_loaded_origin_snapshot(
     session: PIDE_MCP_Session,
     node_name: Document.Node.Name,
-    progress: Progress
+    progress: Progress,
+    wait_seconds: Double = 0
   ): Document.Snapshot = {
+    val deadline = Time.now() + Time.seconds(wait_seconds)
+    def await_snapshot(message: String): Document.Snapshot = {
+      var result: Option[Document.Snapshot] = None
+      while (result.isEmpty && Time.now() < deadline) {
+        progress.expose_interrupt()
+        Time.seconds(0.1).sleep()
+        result = Exn.result(session.node_snapshot(node_name)) match {
+          case Exn.Res(snapshot) => Some(snapshot)
+          case Exn.Exn(exn) if Exn.is_interrupt(exn) => throw exn
+          case Exn.Exn(_) => None
+        }
+      }
+      result.getOrElse(error(message))
+    }
     val snapshot =
       Exn.result { session.node_snapshot(node_name) } match {
         case Exn.Res(snapshot) => snapshot
         case Exn.Exn(_) =>
           if (PIDE_MCP_Util.is_loaded_dynamic(session.tip_version(progress).nodes(node_name)))
-            error(s"The origin ${quote(session.origin(node_name))} is loaded but has not been " +
+            await_snapshot(s"The origin ${quote(session.origin(node_name))} is loaded but has not been " +
               "processed yet. " + retry_soon_message)
           else {
             session.read_update_resolve(node_name, List((1, Some(0))), // pass empty range to load empty nodes
               await_stable_before_resolve = false, hide_others = false, range_context = 0,
               progress = progress)
-            error(s"The origin ${quote(session.origin(node_name))} was not loaded and has now " +
-              "been queued for loading. " + retry_soon_message)
+            await_snapshot(s"The origin ${quote(session.origin(node_name))} was not loaded and has now " +
+              "been queued for loading" +
+              (if (wait_seconds > 0) s" (not ready after ${wait_seconds.toInt} s). " else ". ") + retry_soon_message)
           }
       }
     if (!node_name.is_theory && snapshot.commands_loading.isEmpty)
