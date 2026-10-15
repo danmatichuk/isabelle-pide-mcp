@@ -20,6 +20,9 @@ abstract class PIDE_MCP_Tool(val name: String) {
   def input_schema: JSON.Object.T
   def annotations: Option[JSON.Object.T] = None
 
+  // unknown arguments are an error (nothing is done), not ignored with a note: for tools that change files
+  def reject_unknown_arguments: Boolean = false
+
   // called after each session start
   def start(
     sessions: PIDE_MCP_Sessions,

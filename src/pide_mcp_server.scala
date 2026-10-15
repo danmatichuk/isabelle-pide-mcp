@@ -20,6 +20,13 @@ class PIDE_MCP_Server(
 
   private val output_format = PIDE_MCP_Render.Output_Format.default(sessions.options)
 
+  // arguments of a call that are not in the tool's schema (they would be ignored silently)
+  private def ignored_arguments(tool: PIDE_MCP_Tool, args: JSON.Object.T): List[String] = {
+    val schema = PIDE_MCP_Render.input_schema(tool.input_schema, output_format)
+    val known = schema.get("properties").collect { case JSON.Object(o) => o.keySet }.getOrElse(Set.empty)
+    if (known.isEmpty) Nil else args.keysIterator.filterNot(known).toList.sorted
+  }
+
   private def respond(out: BufferedWriter, body: JSON.Object.T): Unit = {
     val text = JSON.Format(body)
     if (log_messages) log(text)
@@ -69,9 +76,27 @@ class PIDE_MCP_Server(
     override protected def run(): Unit = {
       val result = Exn.capture {
         progress.expose_interrupt()
-        Exn.result(PIDE_MCP_Render.format(call.args, output_format)) match {
-          case Exn.Res(format) => PIDE_MCP_Render.result(format, tool.handle(sessions, call.args, progress))
-          case Exn.Exn(exn) => PIDE_MCP_Tool_Result.exn_error(exn)
+        val ignored = ignored_arguments(tool, call.args)
+        if (ignored.nonEmpty && tool.reject_unknown_arguments)
+          PIDE_MCP_Tool_Result.Error(s"Unknown argument(s): ${ignored.mkString(", ")} (not in the schema of this tool; " +
+            "see its description). Nothing was done: repeat the call with the tool's own argument names")
+        else {
+          Exn.result(PIDE_MCP_Render.format(call.args, output_format)) match {
+            case Exn.Res(format) =>
+              val result = tool.handle(sessions, call.args, progress) match {
+                case Result.Res(json) if ignored.nonEmpty =>
+                  val note = s"ignored unknown argument(s): ${ignored.mkString(", ")} " +
+                    "(not in the schema of this tool; see its description)"
+                  json match {
+                    case JSON.Object(obj) => Result.Res(obj + ("note" -> note))
+                    case text: String => Result.Res(text + "\nnote: " + note)
+                    case other => Result.Res(other)
+                  }
+                case result => result
+              }
+              PIDE_MCP_Render.result(format, result)
+            case Exn.Exn(exn) => PIDE_MCP_Tool_Result.exn_error(exn)
+          }
         }
       }
       events.send(Event.Tool_Result(id, result))

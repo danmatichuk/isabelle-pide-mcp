@@ -198,6 +198,8 @@ class Tool_Edit extends PIDE_MCP_Tool("edit") {
 
   override def annotations: Option[JSON.Object.T] = Some(JSON_Object("destructiveHint" -> true))
 
+  override def reject_unknown_arguments: Boolean = true
+
   def handle(
     sessions: PIDE_MCP_Sessions,
     args: JSON.Object.T,
