@@ -4,6 +4,9 @@ PIDE MCP NEWS -- history of user-relevant changes
 New in this PIDE MCP version
 ----------------------------
 
+* Tool results are readable YAML-like text by default (no JSON quoting, real line breaks), returned as content only, without
+    `structuredContent`. Every tool takes the argument `format` (`yaml` or `json`; `json` returns the previous structured result);
+    the new option `pide_mcp_output_format` sets the default. INCOMPATIBILITY.
 * Add Isabelle/ML skill file.
 * Reading or editing a theory loads its unloaded files.
 * `unload` now also unloads files of unloaded theories unless a remaining theory still loads them.

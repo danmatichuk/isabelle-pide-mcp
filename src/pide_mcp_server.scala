@@ -18,6 +18,8 @@ class PIDE_MCP_Server(
   log_messages: Boolean
 ) {
 
+  private val output_format = PIDE_MCP_Render.Output_Format.default(sessions.options)
+
   private def respond(out: BufferedWriter, body: JSON.Object.T): Unit = {
     val text = JSON.Format(body)
     if (log_messages) log(text)
@@ -67,7 +69,10 @@ class PIDE_MCP_Server(
     override protected def run(): Unit = {
       val result = Exn.capture {
         progress.expose_interrupt()
-        tool.handle(sessions, call.args, progress)
+        Exn.result(PIDE_MCP_Render.format(call.args, output_format)) match {
+          case Exn.Res(format) => PIDE_MCP_Render.result(format, tool.handle(sessions, call.args, progress))
+          case Exn.Exn(exn) => PIDE_MCP_Tool_Result.exn_error(exn)
+        }
       }
       events.send(Event.Tool_Result(id, result))
     }
@@ -251,7 +256,7 @@ class PIDE_MCP_Server(
   private def handle_tools_list(id: JSON_RPC.Id, out: BufferedWriter): Unit = {
     val tools = sessions.tool_table.values.toList.sortBy(_.name).map { tool =>
       val entry = JSON_Object("name" -> tool.name, "description" -> tool.description,
-        "inputSchema" -> tool.input_schema)
+        "inputSchema" -> PIDE_MCP_Render.input_schema(tool.input_schema, output_format))
       tool.annotations match {
         case Some(a) => entry + ("annotations" -> a)
         case None => entry

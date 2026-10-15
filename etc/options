@@ -20,3 +20,6 @@ option pide_mcp_session_statistics_limit : int = 200 for pide_mcp
 
 option pide_mcp_tools : string = "*" for pide_mcp
   -- "comma-separated names of tools to serve or \"*\" to serve all"
+
+option pide_mcp_output_format : string = "yaml" for pide_mcp
+  -- "default format of tool results: yaml (readable text, content only) or json (structured content); the format argument of each tool overrides it"
