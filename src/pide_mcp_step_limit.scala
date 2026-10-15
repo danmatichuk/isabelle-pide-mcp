@@ -7,8 +7,8 @@ evaluation of the command, an edit of it (a new command) or a re-evaluation has 
 PIDE sessions are affected, not batch builds or the user's editor.
 
 After the interrupt, the step's method runs again on the goal before the step, like `apply_inspect` with the
-limits of the helper theory ml/PIDE_MCP_Apply_Inspect.thy (paused after 200 ms): `get_state` shows the interim
-goal state that it reached then.
+limits of the helper theory ml/PIDE_MCP_Apply_Inspect.thy (at most 5 s, goal states recorded from 200 ms on):
+`get_state` shows the first recorded goal state, the interim goal.
 */
 
 package isabelle.pide.mcp
@@ -57,7 +57,7 @@ object PIDE_MCP_Step_Limit {
     s"retry without the limit: `retry_without_limit` with this file and start_line $line; " +
       "or replace the step by a cheaper one"
 
-  /* interim goals: the goal state that the method of an interrupted step reaches when apply_inspect pauses it */
+  /* interim goals: the goal state that the method of an interrupted step has reached at apply_inspect's trace start */
 
   val helper: String = "$PIDE_MCP_HOME/ml/PIDE_MCP_Apply_Inspect.thy"
   val helper_import: String = "\"$PIDE_MCP_HOME/ml/PIDE_MCP_Apply_Inspect\""
@@ -66,10 +66,11 @@ object PIDE_MCP_Step_Limit {
 
   sealed case class Interim(
     method: String,
-    outcome: String,  // pending, paused, finished, failed, unavailable
+    outcome: String,  // pending, traced, finished, failed, unavailable
     time_ms: Long = 0,
     timeout_ms: Long = 0,
-    step_ms: Long = 0,
+    start_ms: Long = 0,
+    interval_ms: Long = 0,
     goal: String = "",
     error: String = ""
   ) {
@@ -80,15 +81,16 @@ object PIDE_MCP_Step_Limit {
         else (goal_lines.take(goal_max_lines) :+ s"... (+${goal_lines.length - goal_max_lines} lines)").mkString("\n")
       outcome match {
         case "pending" =>
-          JSON_Object("interim_goal" -> s"pending: `$method` runs again with apply_inspect, to be paused after a moment")
-        case "paused" =>
+          JSON_Object("interim_goal" -> s"pending: `$method` runs again with apply_inspect (a few seconds)")
+        case "traced" =>
           JSON_Object("interim_goal_after_ms" -> time_ms, "interim_goal" -> shown_goal,
             "interim_goal_hint" ->
-              (s"the goal state that `$method` reached after about $time_ms ms, where apply_inspect paused it. " +
-                s"To get it in your proof: add $helper_import to the theory imports (it sets the same limits: " +
-                s"$timeout_ms ms, then $step_ms ms per `back`), write `apply_inspect $method` in place of the step, " +
-                s"and add `back` lines after it: each continues the method for $step_ms ms and shows the goal state " +
-                "reached then. Remove them and the import afterwards"))
+              (s"the goal state that `$method` had reached after about $time_ms ms, traced by apply_inspect " +
+                "(within a simp call: the term it had rewritten to). " +
+                s"To get it in your proof: add $helper_import to the theory imports (it sets the same limits), " +
+                s"write `apply_inspect $method` in place of the step, and add `back` lines after it: each shows the " +
+                s"goal state $interval_ms ms later, with the theorems used in between, up to $timeout_ms ms. " +
+                "Remove them and the import afterwards"))
         case "finished" =>
           JSON_Object("interim_goal" -> s"`$method` finished within the apply_inspect limit in the diagnostic run")
         case "failed" =>
@@ -270,7 +272,8 @@ class PIDE_MCP_Step_Limit(session: PIDE_MCP_Session) {
             head.collectFirst { case l if l.startsWith(name + ": ") => l.drop(name.length + 2) }.getOrElse("")
           def ms(name: String): Long = field(name).toLongOption.getOrElse(0L)
           Interim(method, field("outcome") match { case "" => "unavailable" case o => o },
-            time_ms = ms("time_ms"), timeout_ms = ms("timeout_ms"), step_ms = ms("step_ms"),
+            time_ms = ms("time_ms"), timeout_ms = ms("timeout_ms"), start_ms = ms("start_ms"),
+            interval_ms = ms("interval_ms"),
             goal = goal.drop(1).mkString("\n"), error = field("error"))
         }
       }
