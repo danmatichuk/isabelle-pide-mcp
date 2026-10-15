@@ -82,6 +82,77 @@ object PIDE_MCP_Tool_Util {
     snapshot
   }
 
+  /* Synchronise loaded files that were edited on disk outside of the server (e.g. by scripts).
+     Waits until the edit is part of the current document version (not until it is processed),
+     so that the state never shows results of the replaced text. Returns the synced changes. */
+  private val sync_lines_limit = 10
+
+  // changed lines of the new text, e.g. "11", "151-152", "30 (removed)"
+  private def sync_lines(change: PIDE_MCP_Session#Sync_Change): List[String] = {
+    val ranges = change.hunks.map { h =>
+      if (h.new_lines == 0) s"${h.new_line} (removed)"
+      else if (h.new_lines == 1) h.new_line.toString
+      else s"${h.new_line}-${h.new_line + h.new_lines - 1}"
+    }
+    if (ranges.length > sync_lines_limit)
+      ranges.take(sync_lines_limit) :+ s"... (+${ranges.length - sync_lines_limit} more spans)"
+    else ranges
+  }
+
+  def sync_disk_edits(
+    session: PIDE_MCP_Session,
+    progress: Progress
+  ): Option[(List[Document.Node.Name], JSON.Object.T)] = {
+    val changes = session.sync_disk(progress)
+    Option.when(changes.nonEmpty) {
+      val node_names = changes.map(_.node_name)
+      session.await_stable_snapshot(progress)
+      session.resolve_dependencies(node_names, progress)
+      (node_names, JSON_Object(
+        "files" -> changes.map(change => JSON_Object(
+          "origin" -> session.origin(change.node_name),
+          "changed_lines" -> change.changed_lines,
+          "lines" -> sync_lines(change),
+          "total_lines" -> change.total_lines))))
+    }
+  }
+
+  def with_synced(
+    json: JSON.Object.T,
+    synced: Option[(List[Document.Node.Name], JSON.Object.T)]
+  ): JSON.Object.T =
+    json ++ JSON.optional("external_edits_synced" -> synced.map(_._2))
+
+  /* After a disk edit was synced, the results of the old text are gone and the new text is not processed yet:
+     wait a little (until the lines are processed, at most `seconds`), such that the state shows the new text. */
+  def await_processed(
+    session: PIDE_MCP_Session,
+    node_name: Document.Node.Name,
+    start_line: Int,
+    end_line: Int,
+    seconds: Double,
+    progress: Progress
+  ): Unit = {
+    val deadline = Time.now() + Time.seconds(seconds)
+    def pending: Boolean =
+      Exn.result(session.node_snapshot(node_name)) match {
+        case Exn.Res(snapshot) =>
+          val doc = Line.Document(snapshot.node.source)
+          snapshot.is_outdated ||
+            PIDE_MCP_Util.text_range(doc, start_line, end_line min doc.lines.length).exists(range =>
+              PIDE_MCP_Command.iterator(snapshot, Some(range)).exists { case (cmd, _) =>
+                val status = PIDE_MCP_Command.status(snapshot, cmd)
+                status.is_unprocessed || status.is_running
+              })
+        case Exn.Exn(exn) if Exn.is_interrupt(exn) => throw exn
+        case Exn.Exn(_) => true
+      }
+    while (Time.now() < deadline && pending) {
+      progress.expose_interrupt()
+      Time.seconds(0.1).sleep()
+    }
+  }
+
   def require_ordered_lines(
     opt_start_line: Option[Int],
     opt_end_line: Option[Int]

@@ -45,14 +45,16 @@ Important rules (further elaborated in the sections below):
 
 ### State Synchronization
 - **All changes are immediately checked** by PIDE after edits.
-- **Do not edit files via other means** (shell, other editors) - always use MCP tools to keep PIDE state synchronized. Reading via other tools (e.g. grep) for unloaded theories for exploration (e.g. grepping the AFP) is OK.
-- **If you experience discrepancies between the PIDE state and the file's disk content, use read on the affected file to re-synchronise the content.** Such discrepancies might happen, for example, when a human user is working on the same file as you or when you didn't edit a file via PIDE but with primitive file operations.
+- **You may edit with whatever is convenient:** the `edit` tool, your own file tools, or scripts (`sed`, Python,...) for mechanical or multi-location rewrites. Write each file in one go, not in several partial steps.
+- **`get_state`, `get_session_state`, and `find_entities` automatically pick up changes made on disk** to all loaded files (also by a human who saves their editor), and send only the changed lines to PIDE. After an edit with other tools, just call `get_state`; no `read` is needed. The result then lists the file under `external_edits_synced`, with the changed lines in the new text (at most 10 spans). These lines only show where the text changed: a local edit can break commands anywhere after it (and in dependent theories), so check the whole file's state, not just those lines.
+- After syncing, `get_state` waits up to 5 s for the changed lines to be processed. After a big rewrite, many commands may still be reprocessing when it answers: call it again before trusting the counts.
+- **Use `read` to re-synchronise** only for files that are not loaded yet, or if the state still does not match the disk (changes are detected by modification time and size, so a same-size edit within the same timestamp tick can be missed). Base session theories are static and never synchronised.
+- Reading unloaded theories with other tools (e.g. grepping the AFP) is fine.
 - **Avoid absolute file path imports for theories. Use session-qualified theory names for sessions available to you.** See `get_session_state` on how to find session qualifiers.
-- When you are told to synchronise, just re-read the file.
-- **Edits require `old_text` (the text to be searched for in the target range). If the file changed since you last read it (e.g., a human edited it concurrently), old_text might not be found and the edit be rejected. Re-synchronise in this case.**
+- **`edit` reads its file from disk before matching `old_text`.** If `old_text` is rejected as not found, the text really differs from what you expect (e.g. a human edited it): `read` the range again.
 
 ### After Every Edit
-1. **Check for errors/unfinished/successful commands after edits with `get_state`**.
+1. **Check for errors/unfinished/successful commands after edits (also with other tools) with `get_state`**, which synchronises disk edits first.
 2. **`sorry`s are included as `bad` commands. `errors` counts actual failures. A "clean" state requires both to be 0.**
 
 ### Time Management

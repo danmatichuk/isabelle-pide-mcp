@@ -12,7 +12,9 @@ class Tool_Get_State extends PIDE_MCP_Tool("get_state") {
       "Returns a summary (errors, warnings, commands still running, total timing,...) and details for all commands in range. " +
       "**Use this frequently to check if you are making progress, what is left to be done, and importantly, if certain commands are still processing, potentially even looping.** " +
       "For non-theory files, the response has a single command entry derived from the command that loaded it in the respective theory. " +
-      PIDE_MCP_Tool_Schema.implicit_load_file
+      PIDE_MCP_Tool_Schema.implicit_load_file + " " +
+      PIDE_MCP_Tool_Schema.sync_disk_edits + " " +
+      s"After such a sync it waits up to ${Tool_Get_State.sync_wait_seconds.toInt} s for the changed lines to be processed."
 
   private val include_types_arg = PIDE_MCP_Tool_Arg.bool_default(
     "include_types",
@@ -52,10 +54,15 @@ class Tool_Get_State extends PIDE_MCP_Tool("get_state") {
     PIDE_MCP_Tool_Result.result {
       val session = PIDE_MCP_Tool_Util.running_session_param(sessions, args)
       val node_name = PIDE_MCP_Tool_Util.origin_param(session, args)
-      val snapshot =
-        PIDE_MCP_Tool_Util.require_loaded_origin_snapshot(session, node_name, progress)
+      val synced = PIDE_MCP_Tool_Util.sync_disk_edits(session, progress)
       val opt_start_line = PIDE_MCP_Tool_Schema.opt_start_line_arg.get(args)
       val opt_end_line = PIDE_MCP_Tool_Schema.opt_end_line_arg.get(args)
+      // the results of the old text are gone, the new text is not processed yet
+      if (synced.exists(_._1.contains(node_name)))
+        PIDE_MCP_Tool_Util.await_processed(session, node_name, opt_start_line.getOrElse(1),
+          opt_end_line.getOrElse(Int.MaxValue), Tool_Get_State.sync_wait_seconds, progress)
+      val snapshot =
+        PIDE_MCP_Tool_Util.require_loaded_origin_snapshot(session, node_name, progress)
       val doc = Line.Document(snapshot.node.source)
       val (start_line, end_line) =
         PIDE_MCP_Tool_Util.resolve_lines(opt_start_line, opt_end_line, doc.lines.length)
@@ -65,8 +72,13 @@ class Tool_Get_State extends PIDE_MCP_Tool("get_state") {
       val commands_limit = commands_limit_arg.get(args)
       val range = PIDE_MCP_Util.text_range(doc, start_line, end_line).get
       val states = PIDE_MCP_Command.State.states(snapshot, Some(range))
-      PIDE_MCP_Command.State.states_json(states, doc, opts, commands_limit)
+      PIDE_MCP_Tool_Util.with_synced(
+        PIDE_MCP_Command.State.states_json(states, doc, opts, commands_limit), synced)
     }
+}
+
+object Tool_Get_State {
+  val sync_wait_seconds: Double = 5.0
 }
 
 class Tools_Get_State extends PIDE_MCP_Tools(new Tool_Get_State)

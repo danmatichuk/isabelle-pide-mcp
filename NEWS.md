@@ -4,6 +4,9 @@ PIDE MCP NEWS -- history of user-relevant changes
 New in this PIDE MCP version
 ----------------------------
 
+* `get_state`, `get_session_state`, and `find_entities` pick up edits of loaded files made on disk outside of the server (scripts, other editors, the agent's
+    own file tools) before they answer, so no `read` is needed after such edits. Only the changed line spans are sent to PIDE. The result lists the
+    synced files under `external_edits_synced`, with the changed lines; after syncing, `get_state` waits up to 5 s for the changed lines to be processed.
 * Tool results are readable YAML-like text by default (no JSON quoting, real line breaks), returned as content only, without
     `structuredContent`. Every tool takes the argument `format` (`yaml` or `json`; `json` returns the previous structured result);
     the new option `pide_mcp_output_format` sets the default. INCOMPATIBILITY.
