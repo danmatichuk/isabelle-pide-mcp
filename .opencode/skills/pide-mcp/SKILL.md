@@ -51,7 +51,7 @@ Important rules (further elaborated in the sections below):
 - **Use `read` to re-synchronise** only for files that are not loaded yet, or if the state still does not match the disk (changes are detected by modification time and size, so a same-size edit within the same timestamp tick can be missed). Base session theories are static and never synchronised.
 - Reading unloaded theories with other tools (e.g. grepping the AFP) is fine.
 - **Avoid absolute file path imports for theories. Use session-qualified theory names for sessions available to you.** See `get_session_state` on how to find session qualifiers.
-- **`edit` reads its file from disk before matching `old_text`.** If `old_text` is rejected as not found, the text really differs from what you expect (e.g. a human edited it): `read` the range again.
+- **`edit` reads its file from disk before matching `old_text`.** If `old_text` is rejected as not found, the text really differs from what you expect (e.g. a human edited it): `read` the range again. Symbols match in either form (`\<rightarrow>` or `→`); lines outside the edited range keep their bytes on disk.
 
 ### After Every Edit
 1. **Check for errors/unfinished/successful commands after edits (also with other tools) with `get_state`**, which synchronises disk edits first.

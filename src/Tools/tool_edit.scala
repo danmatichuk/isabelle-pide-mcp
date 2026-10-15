@@ -51,6 +51,64 @@ object Tool_Edit {
     }
   }
 
+  // One edit as a replacement of [start, stop) of the (symbol-decoded) old text by `text`.
+  def edit_replacements(
+    mode: Edit_Mode,
+    offsets: List[Text.Offset],
+    old_length: Int,
+    new_text: String
+  ): List[(Text.Offset, Text.Offset, String)] =
+    offsets.map { offset =>
+      mode match {
+        case Edit_Mode.replace => (offset, offset + old_length, new_text)
+        case Edit_Mode.prepend => (offset, offset, new_text)
+        case Edit_Mode.append => (offset + old_length, offset + old_length, new_text)
+      }
+    }
+
+  /* New file content: lines that no edit touches keep their raw text from disk (byte for byte,
+     e.g. literal Unicode symbols are not turned into \<...>); only lines touched by an edit are
+     rebuilt and symbol-encoded. `raw` and `decoded` are the old file text (line-normalised)
+     before and after symbol decoding, `replacements` refer to `decoded`. */
+  def merge_into_raw(
+    raw: String,
+    decoded: String,
+    replacements: List[(Text.Offset, Text.Offset, String)]
+  ): String = {
+    val raw_lines = raw.split("\n", -1)
+    val line_starts = 0 :: decoded.indices.filter(decoded(_) == '\n').map(_ + 1).toList
+    if (raw_lines.length != line_starts.length) Symbol.encode(apply_replacements(decoded, replacements))
+    else {
+      def line_of(offset: Text.Offset): Int = line_starts.lastIndexWhere(_ <= offset)
+      def line_end(line: Int): Int =
+        if (line + 1 < line_starts.length) line_starts(line + 1) - 1 else decoded.length
+      // group the edits by the (merged) range of old lines that they touch
+      val sorted = replacements.sortBy(_._1)
+      val groups = sorted.foldLeft(List.empty[(Int, Int, List[(Text.Offset, Text.Offset, String)])]) {
+        case ((first, last, rs) :: rest, r) if line_of(r._1) <= last =>
+          (first, last max line_of(r._2), r :: rs) :: rest
+        case (acc, r) => (line_of(r._1), line_of(r._2), List(r)) :: acc
+      }.reverse
+      val out = new StringBuilder
+      var next = 0
+      for ((first, last, rs) <- groups) {
+        for (i <- next until first) out ++= raw_lines(i) += '\n'
+        val base = line_starts(first)
+        val segment = decoded.substring(base, line_end(last))
+        val shifted = rs.map { case (start, stop, text) => (start - base, stop - base, text) }
+        out ++= Symbol.encode(apply_replacements(segment, shifted))
+        if (last + 1 < line_starts.length) out += '\n'
+        next = last + 1
+      }
+      for (i <- next until raw_lines.length) { out ++= raw_lines(i); if (i + 1 < raw_lines.length) out += '\n' }
+      out.toString
+    }
+  }
+
+  def apply_replacements(text: String, replacements: List[(Text.Offset, Text.Offset, String)]): String =
+    replacements.sortBy(_._1).reverseIterator.foldLeft(text) { case (t, (start, stop, new_text)) =>
+      t.substring(0, start) + new_text + t.substring(stop) }
+
   def read_update_edit(
     session: PIDE_MCP_Session,
     mode: Edit_Mode,
@@ -78,7 +136,9 @@ object Tool_Edit {
         else {
           val occurrences = new Regex(Regex.quote(actual_old_text))
             .findAllMatchIn(range_text).map(_.start + edit_range.start).toList
-          if (occurrences.isEmpty) error("old_text not found in the given range")
+          if (occurrences.isEmpty)
+            error("old_text not found in the given range (symbols are matched in Unicode form: `\\<rightarrow>` " +
+              "and `→` are both accepted for the same text; check line breaks and leading whitespace)")
           if (!edit_all && occurrences.length > 1)
             error(s"Found ${occurrences.length} occurrences of old_text in the given range. Expected exactly 1. " +
               "Provide more context (larger old_text), restrict the range, or use edit_all.")
@@ -95,7 +155,10 @@ object Tool_Edit {
           (line_range.start.line1, Some(line_range.stop.line1))
         }
       progress.expose_interrupt()
-      if (changed) session.write_file_content(node_name.path, computed_text)
+      if (changed)
+        session.write_file_text(node_name.path,
+          merge_into_raw(Line.normalize(File.read(node_name.path)), current_text,
+            edit_replacements(mode, offsets, actual_old_text.length, new_text)))
       val text = session.read_update(
         List(node_name -> visible_lines), hide_others = true,
         // avoid disk <--> PIDE disagreement
@@ -112,6 +175,8 @@ class Tool_Edit extends PIDE_MCP_Tool("edit") {
     "Edit a file by either replacing, prepending to, or appending to a matching old text in a given range. " +
       "Returns once Isabelle has processed the edit, which takes longer if the origin's dependencies were not loaded yet. " +
       "Note: base session files are static and cannot be edited. " +
+      "Lines outside the edited range keep their on-disk text byte for byte (including literal Unicode symbols); " +
+      "`old_text` is matched with symbols in Unicode form, so `\\<rightarrow>` and `→` are equivalent. " +
       PIDE_MCP_Tool_Schema.range_visibility + " " +
       PIDE_MCP_Tool_Schema.implicit_reload_file
 
@@ -143,7 +208,7 @@ class Tool_Edit extends PIDE_MCP_Tool("edit") {
       val node_name = PIDE_MCP_Tool_Util.origin_param(session, args)
       val mode = mode_arg.get(args)
       val text = Line.normalize(text_arg.get(args))
-      val old_text = Line.normalize(old_text_arg.get(args))
+      val old_text = Symbol.decode(Line.normalize(old_text_arg.get(args)))
       val edit_all = edit_all_arg.get(args)
       val opt_start_line = PIDE_MCP_Tool_Schema.opt_start_line_arg.get(args)
       val opt_end_line = PIDE_MCP_Tool_Schema.opt_end_line_arg.get(args)
