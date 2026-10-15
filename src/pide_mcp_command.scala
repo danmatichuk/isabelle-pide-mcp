@@ -203,10 +203,10 @@ object PIDE_MCP_Command {
 
   object State {
     def commands(snapshot: Document.Snapshot, range: Option[Text.Range]): Iterator[State] =
-      iterator(snapshot, range).map { case (cmd, command_start) =>
-        val restricted = PIDE_MCP_Util.intersect_range(cmd.range + command_start, range)
-        State(snapshot, cmd, restricted,
-          results(snapshot, cmd, command_start, restricted).toList)
+      iterator(snapshot, range).filterNot(_._1.is_ignored).map { case (cmd, command_start) =>
+        val full = cmd.range + command_start
+        val restricted = PIDE_MCP_Util.intersect_range(full, range)
+        State(snapshot, cmd, restricted, results(snapshot, cmd, command_start, full).toList, full)
       }
 
     def command_spans(
@@ -215,16 +215,17 @@ object PIDE_MCP_Command {
       range: Option[Text.Range]
     ): Iterator[State] =
       snapshot.command_spans(PIDE_MCP_Util.restrict_text_range(snapshot.node.source, range))
-        .iterator.map { span =>
+        .iterator.filterNot(span =>
+          PIDE_MCP_Util.is_ignored_source(span.range.substring(snapshot.node.source))).map { span =>
           val restricted = PIDE_MCP_Util.intersect_range(span.range, range)
           State(snapshot, theory_cmd, restricted,
-            Rendering.text_messages(snapshot, restricted).map(_.info))
+            Rendering.text_messages(snapshot, span.range).map(_.info), span.range)
         }
 
     def blob(snapshot: Document.Snapshot, range: Option[Text.Range]): Option[State] =
       snapshot.commands_loading.headOption.map { cmd =>
         val restricted = PIDE_MCP_Util.restrict_text_range(snapshot.node.source, range)
-        State(snapshot, cmd, restricted, results(snapshot, cmd, 0, restricted).toList)
+        State(snapshot, cmd, restricted, results(snapshot, cmd, 0, restricted).toList, restricted)
       }
 
     def states(snapshot: Document.Snapshot, range: Option[Text.Range]): Iterator[State] =
@@ -293,14 +294,15 @@ object PIDE_MCP_Command {
   sealed case class State private(
     snapshot: Document.Snapshot,
     cmd: Command,
-    range: Text.Range,
-    results: List[XML.Elem]
+    range: Text.Range, // requested part of the command, for types, facts, and markup
+    results: List[XML.Elem],
+    command_range: Text.Range // the whole command, for status, messages, and source
   ) {
     lazy val cmd_status: Document_Status.Command_Status =
       PIDE_MCP_Command.status(snapshot, cmd)
 
     private def has_markup(elements: Markup.Elements): Boolean =
-      snapshot.select(range, elements, _ => { case _ => Some(()) }).nonEmpty
+      snapshot.select(command_range, elements, _ => { case _ => Some(()) }).nonEmpty
 
     // interrupted at the step time limit (pide_mcp_step_time_limit), not once it runs again
     lazy val interrupted_at: Option[Double] =
@@ -326,11 +328,11 @@ object PIDE_MCP_Command {
         (if (cmd_status.is_running) Running_Clock.elapsed_ms(snapshot, cmd) else 0L)
     lazy val errors: Int = results.count(Protocol.is_error)
     lazy val warnings: Int = results.count(Protocol.is_warning_or_legacy)
-    lazy val bad: List[JSON.Object.T] = bad_json(snapshot, range)
+    lazy val bad: List[JSON.Object.T] = bad_json(snapshot, command_range)
 
     def json(doc: Line.Document, opts: State.Options): JSON.Object.T = {
-      val source_line = doc.position(range.start).line1
-      val source = range.substring(snapshot.node.source).stripLineEnd
+      val source_line = doc.position(command_range.start).line1
+      val source = command_range.substring(snapshot.node.source).stripLineEnd
       val entries: List[Option[JSON.Object.Entry]] =
         List(
           Some("status" -> status),

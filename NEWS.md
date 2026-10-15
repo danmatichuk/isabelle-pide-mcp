@@ -8,6 +8,9 @@ New in this PIDE MCP version
     Unicode symbols elsewhere turned into `\<Longrightarrow>` etc.); `old_text` is matched with symbols in Unicode form.
 * `edit` refuses unknown arguments (nothing is done); other tools note them in the result (before, they were ignored silently).
 * `get_state` on a file that is not loaded yet loads it and waits up to 10 s for it, instead of asking to retry.
+* `get_state` for a line range reports the status, messages, `bad` markers and source of every command overlapping it in full,
+    instead of cutting them to the range; types, facts and markup still respect the range. Whitespace and comment-only spans are
+    no longer listed or counted as commands.
 * Time limit for proof steps: a step (`apply`, `by`, `proof`, `qed`, `done`, `.`, `..`) whose real run (also of a forked proof) reaches
     the new option `pide_mcp_step_time_limit` (default 5 s; 0: no limit) is interrupted. `get_state` shows it as `canceled`, with
     `interrupted_at_limit_seconds` and a hint. The new tool `retry_without_limit` runs such a step again, once, without the limit

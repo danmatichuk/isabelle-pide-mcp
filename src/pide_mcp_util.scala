@@ -78,6 +78,10 @@ object PIDE_MCP_Util {
   def restrict_text_range(text: String, range: Option[Text.Range]): Text.Range =
     intersect_range(Text.Range.length(text), range)
 
+  // only whitespace and comments: such spans are no commands and have no content to report
+  def is_ignored_source(text: String): Boolean =
+    Token.explode(Keyword.Keywords.empty, text).forall(_.is_ignored)
+
   def elem_body_plain_text(elem: XML.Elem): String =
     Pretty.string_of(elem.body, pure = true)
 }
