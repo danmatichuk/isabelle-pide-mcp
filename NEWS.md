@@ -13,12 +13,14 @@ New in this PIDE MCP version
     no longer listed or counted as commands.
 * `create_scratch` creates a `.thy` file by default and adds a missing leading dot to `extension` (before, it created a file without
     extension that PIDE could not load). An origin that is a file without extension gives a clear error instead of `Illegal character "/"`.
-* Interim goals of interrupted steps: after a proof step is interrupted at the time limit, its method runs again on the goal before
-    the step with `apply_inspect` (git submodule deps/apply_inspect); `get_state` shows the goal state that it had reached after
-    200 ms (`interim_goal`, `interim_goal_after_ms`; within a simp call the term it had rewritten to) and how to step through the
-    run with `apply_inspect` and `back` (100 ms per `back`, up to 5 s). The new helper theory ml/PIDE_MCP_Apply_Inspect.thy sets
-    these limits (`apply_inspect_timeout = 5000`, `apply_inspect_trace_start = 200`, `apply_inspect_trace_interval = 100`) and
-    is loaded in the background in sessions based on HOL; a theory that imports it gets the same limits.
+* New tool `apply_inspect`: runs a proof method on the goal before a proof step with apply_inspect (git submodule deps/apply_inspect),
+    stops it after `after_ms` (default 200) and returns the goal state reached then (within a simp call the term it has rewritten to),
+    the theorems used until then (without infrastructure) and loop warnings. The file is not changed (a PIDE query).
+* Interim goals of interrupted steps: after a proof step is interrupted at the time limit, `get_state` shows the goal state that its
+    method reaches after 200 ms (`interim_goal`, `interim_goal_after_ms`, `interim_loops`), computed like the `apply_inspect` tool,
+    with a hint to call that tool for other times. The new helper theory ml/PIDE_MCP_Apply_Inspect.thy holds the query and sets the
+    limits of the `apply_inspect` command for theories that import it (`apply_inspect_timeout = 5000`,
+    `apply_inspect_trace_start = 200`, `apply_inspect_trace_interval = 100`); it is loaded in the background in sessions based on HOL.
 * Time limit for proof steps: a step (`apply`, `by`, `proof`, `qed`, `done`, `.`, `..`) whose real run (also of a forked proof) reaches
     the new option `pide_mcp_step_time_limit` (default 5 s; 0: no limit) is interrupted. `get_state` shows it as `canceled`, with
     `interrupted_at_limit_seconds` and a hint. The new tool `retry_without_limit` runs such a step again, once, without the limit

@@ -8,9 +8,10 @@ reached is recorded every apply_inspect_trace_interval; `apply_inspect` shows th
 state and each `back` the next one. A theory that imports this one gets the same limits for its
 own `apply_inspect`.
 
-The query operation pide_mcp_interim_goal runs a method like `apply_inspect` with these limits on
-the proof state at a position, without changing the theory: the first recorded goal state (for a
-proof step interrupted at pide_mcp_step_time_limit).
+The query operation pide_mcp_apply_inspect runs a method like `apply_inspect` on the proof state
+at a position, without changing the theory, and stops it after a given time (default:
+apply_inspect_trace_start): the goal state that it has reached then. It serves the interim goal
+of a proof step interrupted at pide_mcp_step_time_limit and the `apply_inspect` tool.
 *)
 
 theory PIDE_MCP_Apply_Inspect
@@ -29,43 +30,70 @@ val limits =
   trace_start = Time.fromMilliseconds (Config.get_global \<^theory> Apply_Inspect.trace_start),
   trace_interval = Time.fromMilliseconds (Config.get_global \<^theory> Apply_Inspect.trace_interval)};
 
-val params: Apply_Inspect.params =
-  {every_use = false, on_use = fn _ => fn _ => (), on_loop = fn _ => fn _ => ()};
+val helper_ctxt = Proof_Context.init_global \<^theory>;
 
 fun ms t = string_of_int (Time.toMilliseconds t);
+
+fun plain prt =
+  XML.content_of (YXML.parse_body (Pretty.unformatted_string_of prt))
+  |> String.tokens Char.isSpace |> space_implode " "
+  |> (fn s => if size s > 300 then String.substring (s, 0, 300) ^ " ..." else s);
 
 fun goal_text st =
   Pretty.string_of (Goal_Display.pretty_goal (Proof.context_of st) (#goal (Proof.goal st)));
 
-(*lines: "outcome: traced|finished|failed", "timeout_ms: N", "start_ms: N", "interval_ms: N",
-  "time_ms: N" (traced), "error: ..." (failed), "goal:" and the first recorded goal state (traced)*)
-fun interim_goal [method_arg] state =
+(*args: method, time in ms (empty: apply_inspect_trace_start). The method runs like apply_inspect on the
+  proof state, with that time as both its time limit and the start of the trace: the result is the one
+  goal state that it has reached then (within a simp call, the term it has rewritten to).
+  Lines: "outcome: traced|finished|failed", "time_ms: N", "error: ...", "loop: ..." (loop warnings),
+  "uses:" and "  theorem" lines (theorems used until then, without infrastructure), "goal:" and the goal*)
+fun inspect_at [method_arg, time_arg] state =
       let
         val ctxt = Proof.context_of state;
         val text =
           Parse.read_embedded ctxt (Keyword.no_major_keywords (Thy_Header.get_keywords' ctxt))
             (Scan.many Token.not_eof) (Input.string method_arg)
           |> Method.read ctxt;
-        val {succeeded, error, partial, ...} = Apply_Inspect.inspect_limited params limits text state;
-        val limit_lines =
-          ["timeout_ms: " ^ ms (#timeout limits), "start_ms: " ^ ms (#trace_start limits),
-            "interval_ms: " ^ ms (#trace_interval limits)];
+        val time =
+          (case Int.fromString time_arg of
+            SOME n => Time.fromMilliseconds n
+          | NONE => #trace_start limits);
+        val pretty_use = Apply_Inspect.pretty_use ctxt;
+        val loops = Synchronized.var "pide_mcp_apply_inspect_loops" ([]: string list);
+        fun on_loop source rules =
+          Synchronized.change loops (cons (source ^ " may be looping, repeatedly using: " ^
+            (if null rules then "(no named theorems)" else commas (map (plain o pretty_use) rules))));
+        val params = {every_use = false, on_use = fn _ => fn _ => (), on_loop = on_loop};
+        val {succeeded, error, uses, partial} =
+          Apply_Inspect.inspect_limited params
+            {timeout = time, trace_start = time, trace_interval = time} text state;
+        (*the query runs in the context of another theory, which does not see the apply_inspect_hide
+          declarations of Apply_Inspect: they come from this theory*)
+        fun infrastructure u =
+          Apply_Inspect.infrastructure ctxt u orelse Apply_Inspect.infrastructure helper_ctxt u;
+        fun use_lines us =
+          "uses:" :: map (prefix "  ")
+            (distinct (op =) (map (plain o pretty_use) (filter_out infrastructure us)));
+        val loop_lines = map (prefix "loop: ") (distinct (op =) (rev (Synchronized.value loops)));
       in
         (case Seq.pull partial of
-          SOME ({time, state = st, ...}, _) =>
-            cat_lines (["outcome: traced"] @ limit_lines @ ["time_ms: " ^ ms time, "goal:", goal_text st])
+          SOME ({time, state = st, uses}, _) =>
+            cat_lines (["outcome: traced", "time_ms: " ^ ms time] @ loop_lines @ use_lines uses @
+              ["goal:", goal_text st])
         | NONE =>
-            if succeeded then cat_lines ("outcome: finished" :: limit_lines)
-            else cat_lines ("outcome: failed" :: limit_lines @ the_list (Option.map (prefix "error: ") error)))
+            if succeeded then cat_lines (["outcome: finished"] @ loop_lines @ use_lines uses)
+            else
+              cat_lines (["outcome: failed"] @ the_list (Option.map (prefix "error: ") error) @ loop_lines @
+                use_lines uses))
       end
-  | interim_goal _ _ = error "Bad arguments";
+  | inspect_at _ _ = error "Bad arguments";
 
 val _ =
-  Query_Operation.register {name = "pide_mcp_interim_goal", pri = Task_Queue.urgent_pri}
+  Query_Operation.register {name = "pide_mcp_apply_inspect", pri = Task_Queue.urgent_pri}
     (fn {state = st, args, writeln_result, ...} =>
       (case try Toplevel.proof_of st of
         NONE => error "No proof state at this position"
-      | SOME state => writeln_result (interim_goal args state)));
+      | SOME state => writeln_result (inspect_at args state)));
 
 end;
 \<close>

@@ -340,7 +340,7 @@ object PIDE_MCP_Command {
           interrupted_at.map("interrupted_at_limit_seconds" -> _),
           interrupted_at.map(_ => "hint" -> PIDE_MCP_Step_Limit.retry_note(source_line))) :::
         interrupted_at.toList.flatMap(_ =>
-          PIDE_MCP_Step_Limit.interim(snapshot, cmd).toList.flatMap(_.json.toList.map(Some(_)))) :::
+          PIDE_MCP_Step_Limit.interim(snapshot, cmd).toList.flatMap(_.interim_json(source_line).toList.map(Some(_)))) :::
         List(
           interrupt_sent_seconds.map("interrupt_sent_seconds" -> _),
           Option.when(no_time_limit)("no_time_limit" -> true),

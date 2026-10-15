@@ -184,7 +184,7 @@ class PIDE_MCP_Session private(
     }
   session.commands_changed += running_consumer
 
-  private val step_limit = new PIDE_MCP_Step_Limit(this)
+  val step_limit = new PIDE_MCP_Step_Limit(this)
 
   def stop(): Process_Result = {
     step_limit.stop()

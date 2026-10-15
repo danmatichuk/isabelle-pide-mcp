@@ -57,48 +57,90 @@ object PIDE_MCP_Step_Limit {
     s"retry without the limit: `retry_without_limit` with this file and start_line $line; " +
       "or replace the step by a cheaper one"
 
-  /* interim goals: the goal state that the method of an interrupted step has reached at apply_inspect's trace start */
+  /* interim goals: the goal state that the method of an interrupted step has reached after a moment (apply_inspect) */
 
   val helper: String = "$PIDE_MCP_HOME/ml/PIDE_MCP_Apply_Inspect.thy"
   val helper_import: String = "\"$PIDE_MCP_HOME/ml/PIDE_MCP_Apply_Inspect\""
-  val operation: String = "pide_mcp_interim_goal"
+  val operation: String = "pide_mcp_apply_inspect"
   val goal_max_lines: Int = 40
+
+  def cap_lines(text: String, max_lines: Int): String = {
+    val lines = Line.logical_lines(text)
+    if (max_lines <= 0 || lines.length <= max_lines) text
+    else (lines.take(max_lines) :+ s"... (+${lines.length - max_lines} lines)").mkString("\n")
+  }
 
   sealed case class Interim(
     method: String,
     outcome: String,  // pending, traced, finished, failed, unavailable
     time_ms: Long = 0,
-    timeout_ms: Long = 0,
-    start_ms: Long = 0,
-    interval_ms: Long = 0,
     goal: String = "",
-    error: String = ""
+    error: String = "",
+    uses: List[String] = Nil,
+    loops: List[String] = Nil
   ) {
-    def json: JSON.Object.T = {
-      val goal_lines = Line.logical_lines(goal)
-      val shown_goal =
-        if (goal_lines.length <= goal_max_lines) goal
-        else (goal_lines.take(goal_max_lines) :+ s"... (+${goal_lines.length - goal_max_lines} lines)").mkString("\n")
+    // as part of an interrupted step (line) in get_state
+    def interim_json(line: Int): JSON.Object.T =
       outcome match {
         case "pending" =>
-          JSON_Object("interim_goal" -> s"pending: `$method` runs again with apply_inspect (a few seconds)")
+          JSON_Object("interim_goal" -> s"pending: `$method` runs again with apply_inspect")
         case "traced" =>
-          JSON_Object("interim_goal_after_ms" -> time_ms, "interim_goal" -> shown_goal,
-            "interim_goal_hint" ->
-              (s"the goal state that `$method` had reached after about $time_ms ms, traced by apply_inspect " +
-                "(within a simp call: the term it had rewritten to). " +
-                s"To get it in your proof: add $helper_import to the theory imports (it sets the same limits), " +
-                s"write `apply_inspect $method` in place of the step, and add `back` lines after it: each shows the " +
-                s"goal state $interval_ms ms later, with the theorems used in between, up to $timeout_ms ms. " +
-                "Remove them and the import afterwards"))
+          JSON_Object("interim_goal_after_ms" -> time_ms, "interim_goal" -> cap_lines(goal, goal_max_lines)) ++
+            JSON_Object.if_proper(loops.nonEmpty, JSON_Object("interim_loops" -> loops)) ++
+            JSON_Object("interim_goal_hint" ->
+              (s"the goal state that `$method` had reached after about $time_ms ms (apply_inspect; within a simp " +
+                "call the term it had rewritten to). For the state at another time, without changing the file: " +
+                s"the `apply_inspect` tool with this file, start_line $line and after_ms (e.g. 1000)"))
         case "finished" =>
-          JSON_Object("interim_goal" -> s"`$method` finished within the apply_inspect limit in the diagnostic run")
+          JSON_Object("interim_goal" -> s"`$method` finished in the diagnostic run within $time_ms ms")
         case "failed" =>
           JSON_Object("interim_goal" -> (s"`$method` failed in the diagnostic run" + (if (error.nonEmpty) ": " + error else "")))
         case _ =>
           JSON_Object("interim_goal" -> ("unavailable" + (if (error.nonEmpty) ": " + error else "")))
       }
-    }
+  }
+
+  // the command before cmd (the state after it is the goal of cmd)
+  def previous(snapshot: Document.Snapshot, cmd: Command): Option[Command] =
+    snapshot.node.commands.iterator.takeWhile(_ != cmd).filterNot(_.is_ignored).toList.lastOption
+
+  /* Run the method like apply_inspect on the goal before cmd and stop it after time_ms (None: the helper theory's
+     apply_inspect_trace_start): the goal state that it has reached then. */
+  def inspect(
+    session: PIDE_MCP_Session,
+    cmd: Command,
+    method: String,
+    time_ms: Option[Long],
+    timeout: Time,
+    stop: () => Boolean = () => false,
+    progress: Progress = new Progress
+  ): Interim = {
+    val snapshot = session.node_snapshot(cmd.node_name)
+    val result =
+      for {
+        prev <- previous(snapshot, cmd)
+        offset <- snapshot.node.command_start(prev)
+      } yield {
+        val res = new PIDE_MCP_Query(session, PIDE_MCP_Editor.Context(cmd.node_name, offset), operation, progress)
+          .run(List(method, time_ms.fold("")(_.toString)), Some(timeout), _ => stop())
+        val text = res.output.messages.filter(Protocol.is_writeln).map(PIDE_MCP_Util.elem_body_plain_text).mkString("\n")
+        val errors = res.output.messages.filter(Protocol.is_error).map(PIDE_MCP_Util.elem_body_plain_text)
+        if (res.outcome != PIDE_MCP_Query.Outcome.finished)
+          Interim(method, "unavailable", error = s"the diagnostic run ${res.outcome}")
+        else if (errors.nonEmpty) Interim(method, "failed", error = errors.head)
+        else {
+          val (head, goal) = split_lines(text).span(_ != "goal:")
+          val (fields, uses) = head.span(_ != "uses:")
+          def field(name: String): String =
+            fields.collectFirst { case l if l.startsWith(name + ": ") => l.drop(name.length + 2) }.getOrElse("")
+          Interim(method, field("outcome") match { case "" => "unavailable" case o => o },
+            time_ms = field("time_ms").toLongOption.getOrElse(time_ms.getOrElse(0L)),
+            goal = goal.drop(1).mkString("\n"), error = field("error"),
+            uses = uses.drop(1).map(_.trim).filter(_.nonEmpty),
+            loops = fields.filter(_.startsWith("loop: ")).map(_.stripPrefix("loop: ")))
+        }
+      }
+    result.getOrElse(Interim(method, "unavailable", error = "no goal before this command"))
   }
 
   private val interims = Synchronized(Map.empty[Key, Interim])
@@ -230,9 +272,8 @@ class PIDE_MCP_Step_Limit(session: PIDE_MCP_Session) {
 
   /* interim goals of interrupted steps, one after the other */
 
-
   // the helper theory imports Main: only for sessions based on HOL (otherwise it would load all of HOL)
-  private def load_helper(): Boolean =
+  lazy val helper_loaded: Boolean =
     List("Main", "HOL.Main").exists(session.resources.loaded_theory) &&
       (Exn.result {
         val progress = new Progress
@@ -250,42 +291,12 @@ class PIDE_MCP_Step_Limit(session: PIDE_MCP_Session) {
         case Exn.Exn(_) => false
       })
 
-  private def run_interim(k: Key, cmd: Command, method: String): Interim = {
-    val snapshot = session.node_snapshot(cmd.node_name)
-    val before = snapshot.node.commands.iterator.takeWhile(_ != cmd).filterNot(_.is_ignored).toList
-    val result =
-      for {
-        prev <- before.lastOption
-        offset <- snapshot.node.command_start(prev)
-      } yield {
-        val res = new PIDE_MCP_Query(session, PIDE_MCP_Editor.Context(cmd.node_name, offset), operation, new Progress)
-          .run(List(method), Some(query_timeout),
-            _ => !PIDE_MCP_Step_Limit.key(session.node_snapshot(cmd.node_name), cmd).contains(k))
-        val text = res.output.messages.filter(Protocol.is_writeln).map(PIDE_MCP_Util.elem_body_plain_text).mkString("\n")
-        val errors = res.output.messages.filter(Protocol.is_error).map(PIDE_MCP_Util.elem_body_plain_text)
-        if (res.outcome != PIDE_MCP_Query.Outcome.finished)
-          Interim(method, "unavailable", error = s"the diagnostic run ${res.outcome}")
-        else if (errors.nonEmpty) Interim(method, "failed", error = errors.head)
-        else {
-          val (head, goal) = split_lines(text).span(_ != "goal:")
-          def field(name: String): String =
-            head.collectFirst { case l if l.startsWith(name + ": ") => l.drop(name.length + 2) }.getOrElse("")
-          def ms(name: String): Long = field(name).toLongOption.getOrElse(0L)
-          Interim(method, field("outcome") match { case "" => "unavailable" case o => o },
-            time_ms = ms("time_ms"), timeout_ms = ms("timeout_ms"), start_ms = ms("start_ms"),
-            interval_ms = ms("interval_ms"),
-            goal = goal.drop(1).mkString("\n"), error = field("error"))
-        }
-      }
-    result.getOrElse(Interim(method, "unavailable", error = "no goal before the step"))
-  }
-
   private val interim_worker =
     if (limit <= 0) None
     else Some(Isabelle_Thread.fork(name = s"pide_mcp_interim_goal_${session.id}", daemon = true) {
       Exn.result {
         // loaded eagerly: the first interrupt should not wait for Apply_Inspect to load
-        val ok = load_helper()
+        val ok = helper_loaded
         helper_state.change(_ => Some(ok))
         if (!ok) {
           for ((k, _, m) <- pending.change_result(q => (q, Nil)))
@@ -294,7 +305,8 @@ class PIDE_MCP_Step_Limit(session: PIDE_MCP_Session) {
         while (active && ok) {
           pending.change_result(q => (q.headOption, q.drop(1))) match {
             case Some((k, cmd, m)) =>
-              val interim = Exn.result(run_interim(k, cmd, m)) match {
+              val interim = Exn.result(inspect(session, cmd, m, None, query_timeout,
+                  () => !PIDE_MCP_Step_Limit.key(session.node_snapshot(cmd.node_name), cmd).contains(k))) match {
                 case Exn.Res(interim) => interim
                 case Exn.Exn(exn) => Interim(m, "unavailable", error = Exn.message(exn))
               }
