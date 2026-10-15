@@ -19,7 +19,7 @@ class Tool_Create_Scratch extends PIDE_MCP_Tool("create_scratch") {
     "Label to identify the scratch file (auto-generated if omitted)")
   private val extension_arg = PIDE_MCP_Tool_Arg.opt_string(
     "extension",
-    "File extension (typically \".thy\" or \".ML\")")
+    "File extension, with or without the leading dot (default: \".thy\"). PIDE only loads files with the extension \".thy\" or \".ML\".")
 
   def input_schema: JSON.Object.T = PIDE_MCP_Tool_Schema.input_schema(
     List(PIDE_MCP_Tool_Schema.running_session_arg, name_suffix_arg, extension_arg))
@@ -54,9 +54,13 @@ class Tool_Create_Scratch extends PIDE_MCP_Tool("create_scratch") {
   ): (Path, Boolean) = {
     val suffix = name_suffix.getOrElse(Date.now().format(Date.Format("yyyy_MM_dd_HH_mm_ss_SSS")))
     val base_name = scratch_prefix + suffix
-    val file_name = extension match { case Some(ext) => base_name + ext case None => base_name }
+    // without an extension, PIDE could not load the file
+    val ext = extension.map(_.trim).filter(_.nonEmpty) match {
+      case Some(ext) => if (ext.startsWith(".")) ext else "." + ext
+      case None => ".thy"
+    }
     val file_path =
-      (File.path(get_scratch_dir(session_id)) + Path.basic(file_name)).canonical
+      (File.path(get_scratch_dir(session_id)) + Path.basic(base_name + ext)).canonical
     (file_path, file_path.file.createNewFile())
   }
 

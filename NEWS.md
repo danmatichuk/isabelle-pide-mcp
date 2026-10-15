@@ -11,6 +11,8 @@ New in this PIDE MCP version
 * `get_state` for a line range reports the status, messages, `bad` markers and source of every command overlapping it in full,
     instead of cutting them to the range; types, facts and markup still respect the range. Whitespace and comment-only spans are
     no longer listed or counted as commands.
+* `create_scratch` creates a `.thy` file by default and adds a missing leading dot to `extension` (before, it created a file without
+    extension that PIDE could not load). An origin that is a file without extension gives a clear error instead of `Illegal character "/"`.
 * Time limit for proof steps: a step (`apply`, `by`, `proof`, `qed`, `done`, `.`, `..`) whose real run (also of a forked proof) reaches
     the new option `pide_mcp_step_time_limit` (default 5 s; 0: no limit) is interrupted. `get_state` shows it as `canceled`, with
     `interrupted_at_limit_seconds` and a hint. The new tool `retry_without_limit` runs such a step again, once, without the limit
