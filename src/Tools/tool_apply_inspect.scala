@@ -11,7 +11,8 @@ import isabelle._
 class Tool_Apply_Inspect extends PIDE_MCP_Tool("apply_inspect") {
   def description: String =
     "Run a proof method with apply_inspect on the goal before the command at `start_line`, for at most `timeout_ms`: " +
-      "returns the goal state that the method had reached at the timeout (within a simp call, the term it had rewritten to), the theorems it had " +
+      "returns the goal state that the method had reached at the timeout (within a simp call, the term it had rewritten to), " +
+      "its resulting goal state if it finishes in time, or the state after its last step if it fails; the theorems it had " +
       "used, and loop warnings of the simplifier or classical reasoner. **Use it to see what a slow or looping method " +
       "does** (e.g. a step interrupted at the time limit for proof steps), with different `timeout_ms` for different " +
       "moments of its run. Nothing is applied and the file is not changed. Needs a session based on HOL. " +
@@ -72,15 +73,19 @@ class Tool_Apply_Inspect extends PIDE_MCP_Tool("apply_inspect") {
       JSON_Object("line" -> line1, "command" -> cmd.span.name, "method" -> method, "outcome" -> result.outcome) ++
         (result.outcome match {
           case "traced" => JSON_Object("time_ms" -> result.time_ms)  // when the run ended, shortly after the timeout
-          case "finished" => JSON_Object("note" -> s"the method finished within $timeout_ms ms (no intermediate state)")
-          case _ => JSON_Object.if_proper(result.error.nonEmpty,
-            JSON_Object("error" -> PIDE_MCP_Command.cap_goal(result.error, goal_max_lines_arg.get(args), "error")))
+          case "finished" =>
+            JSON_Object("note" -> s"the method finished within $timeout_ms ms; the goal is its result")
+          case _ =>
+            JSON_Object.if_proper(result.error.nonEmpty,
+              JSON_Object("error" -> PIDE_MCP_Command.cap_goal(result.error, goal_max_lines_arg.get(args), "error"))) ++
+            JSON_Object.if_proper(result.goal.nonEmpty,
+              JSON_Object("note" -> "the goal is the state after the method's last step before it failed"))
         }) ++
         JSON_Object.if_proper(result.loops.nonEmpty, JSON_Object("loops" -> result.loops)) ++
         JSON_Object("theorems_used" ->
           (shown_uses ::: (if (result.uses.length > shown_uses.length)
             List(s"... (+${result.uses.length - shown_uses.length} more; max_uses)") else Nil))) ++
-        JSON_Object.if_proper(result.outcome == "traced",
+        JSON_Object.if_proper(result.goal.nonEmpty,
           JSON_Object("goal" -> PIDE_MCP_Command.cap_goal(result.goal, goal_max_lines_arg.get(args))))
     }
 }

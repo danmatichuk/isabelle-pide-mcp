@@ -27,7 +27,8 @@ New in this PIDE MCP version
     (Pure, loaded in every session) sends the missing status, and the step shows as `canceled`.
 * New tool `apply_inspect`: runs a proof method on the goal before a proof step with apply_inspect (git submodule deps/apply_inspect),
     stops it at `timeout_ms` (apply_inspect's timeout, default 200) and returns the goal state reached then (within a simp call the term it has rewritten to),
-    the theorems used until then (without infrastructure) and loop warnings. The file is not changed (a PIDE query).
+    the theorems used until then (without infrastructure) and loop warnings; for a method that finishes in time its resulting goal
+    state, and for one that fails the state after its last step. The file is not changed (a PIDE query).
 * Interim goals of interrupted steps: after a proof step is interrupted at the time limit, `get_state` shows the goal state that its
     method reaches after 200 ms (`interim_goal`, `interim_goal_after_ms`, `interim_loops`), computed like the `apply_inspect` tool,
     with a hint to call that tool for other times. The new helper theory ml/PIDE_MCP_Apply_Inspect.thy holds the query and sets the
