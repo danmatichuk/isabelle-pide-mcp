@@ -27,11 +27,12 @@ New in this PIDE MCP version
     (Pure, loaded in every session) sends the missing status, and the step shows as `canceled`.
 * New tool `apply_inspect`: runs a proof method on the goal before a proof step with apply_inspect (git submodule deps/apply_inspect),
     stops it at `timeout_ms` (apply_inspect's timeout, default 200) and returns the goal state reached then (within a simp call the term it has rewritten to),
-    the theorems used until then (without infrastructure) and loop warnings; for a method that finishes in time its resulting goal
+    the theorems used until then (without infrastructure, each with how often, `×N`, most frequent first) and loop warnings; for a method that finishes in time its resulting goal
     state, and for one that fails the state after its last step. The file is not changed (a PIDE query).
 * Interim goals of interrupted steps: after a proof step is interrupted at the time limit, `get_state` shows the goal state that its
     method reaches after 200 ms (`interim_goal`, `interim_goal_after_ms`, `interim_loops`), computed like the `apply_inspect` tool,
-    with a hint to call that tool for other times. The new helper theory ml/PIDE_MCP_Apply_Inspect.thy holds the query and sets the
+    with a hint to call that tool for other times; if the method finishes or fails within that time, its resulting goal state or
+    the state after its last step (`interim_goal_hint` says which). The new helper theory ml/PIDE_MCP_Apply_Inspect.thy holds the query and sets the
     limits of the `apply_inspect` command for theories that import it (`apply_inspect_timeout = 5000`,
     `apply_inspect_trace_start = 200`, `apply_inspect_trace_interval = 100`); it is loaded in the background in sessions based on HOL.
 * Time limit for proof steps: a step (`apply`, `by`, `proof`, `qed`, `done`, `.`, `..`) whose real run (also of a forked proof) reaches

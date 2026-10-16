@@ -47,7 +47,8 @@ fun goal_text st =
   before the timeout, there are none, and the result is the goal state at the end of the run itself (frozen at
   the timeout; within a simp call, the term it has rewritten to), without a replay.
   Lines: "outcome: traced|finished|failed", "time_ms: N", "error: ...", "loop: ..." (loop warnings),
-  "uses:" and "  theorem" lines (theorems used until then, without infrastructure), "goal:" and the goal: the
+  "uses:" and "  theorem \<times>N" lines (theorems used until then and how often, most frequent first, without
+  infrastructure), "goal:" and the goal: the
   state at the timeout, the result of a method that finishes, or the state after the last step of one that
   fails (none if it got nowhere)*)
 fun inspect_at [method_arg, time_arg] state =
@@ -67,28 +68,38 @@ fun inspect_at [method_arg, time_arg] state =
           Synchronized.change loops (cons (source ^ " may be looping, repeatedly using: " ^
             (if null rules then "(no named theorems)" else commas (map (plain o pretty_use) rules))));
         val params = {every_use = false, on_use = fn _ => fn _ => (), on_loop = on_loop};
-        val {succeeded, error, uses, partial, final, ...} =
+        val {succeeded, error, use_counts, partial, final, ...} =
           Apply_Inspect.inspect_limited params
             {timeout = time, trace_start = time, trace_interval = time} text state;
         (*the query runs in the context of another theory, which does not see the apply_inspect_hide
           declarations of Apply_Inspect: they come from this theory*)
         fun infrastructure u =
           Apply_Inspect.infrastructure ctxt u orelse Apply_Inspect.infrastructure helper_ctxt u;
-        fun use_lines us =
-          "uses:" :: map (prefix "  ")
-            (distinct (op =) (map (plain o pretty_use) (filter_out infrastructure us)));
+        (*uses that print the same are merged; the order of the first one is kept*)
+        fun use_lines counts =
+          let
+            val merged =
+              fold (fn (u, n) => fn acc =>
+                if infrastructure u then acc
+                else
+                  let val name = plain (pretty_use u) in
+                    (case AList.lookup (op =) acc name of
+                      SOME m => AList.update (op =) (name, m + n) acc
+                    | NONE => acc @ [(name, n)])
+                  end) counts [];
+          in "uses:" :: map (fn (name, n) => "  " ^ name ^ " \<times>" ^ string_of_int n) merged end;
         val loop_lines = map (prefix "loop: ") (distinct (op =) (rev (Synchronized.value loops)));
         val final_goal = (case final of SOME st => ["goal:", goal_text st] | NONE => []);
       in
         (case Seq.pull partial of
-          SOME ({time, state = st, uses, ...}, _) =>
-            cat_lines (["outcome: traced", "time_ms: " ^ ms time] @ loop_lines @ use_lines uses @
+          SOME ({time, state = st, use_counts, ...}, _) =>
+            cat_lines (["outcome: traced", "time_ms: " ^ ms time] @ loop_lines @ use_lines use_counts @
               ["goal:", goal_text st])
         | NONE =>
-            if succeeded then cat_lines (["outcome: finished"] @ loop_lines @ use_lines uses @ final_goal)
+            if succeeded then cat_lines (["outcome: finished"] @ loop_lines @ use_lines use_counts @ final_goal)
             else
               cat_lines (["outcome: failed"] @ the_list (Option.map (prefix "error: ") error) @ loop_lines @
-                use_lines uses @ final_goal))
+                use_lines use_counts @ final_goal))
       end
   | inspect_at _ _ = error "Bad arguments";
 

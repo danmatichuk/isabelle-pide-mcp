@@ -82,7 +82,8 @@ object PIDE_MCP_Step_Limit {
     loops: List[String] = Nil
   ) {
     // as part of an interrupted step (line) in get_state
-    def interim_json(line: Int, goal_max_lines: Int = goal_max_lines): JSON.Object.T =
+    def interim_json(line: Int, goal_max_lines: Int = goal_max_lines): JSON.Object.T = {
+      val within = if (time_ms > 0) s" within $time_ms ms" else ""  // a finished run has no time
       outcome match {
         case "pending" =>
           JSON_Object("interim_goal" -> s"pending: `$method` runs again with apply_inspect")
@@ -93,14 +94,23 @@ object PIDE_MCP_Step_Limit {
               (s"the goal state that `$method` had reached after about $time_ms ms (apply_inspect; within a simp " +
                 "call the term it had rewritten to). For the state at another time, without changing the file: " +
                 s"the `apply_inspect` tool with this file, start_line $line and timeout_ms (e.g. 1000)"))
+        case "finished" if goal.nonEmpty =>
+          JSON_Object("interim_goal" -> PIDE_MCP_Command.cap_goal(goal, goal_max_lines),
+            "interim_goal_hint" ->
+              s"`$method` finished in the diagnostic run (apply_inspect)$within: this is its resulting goal state")
         case "finished" =>
-          JSON_Object("interim_goal" -> s"`$method` finished in the diagnostic run within $time_ms ms")
+          JSON_Object("interim_goal" -> s"`$method` finished in the diagnostic run$within")
         case "failed" =>
-          JSON_Object("interim_goal" -> (s"`$method` failed in the diagnostic run" +
-            (if (error.nonEmpty) ": " + PIDE_MCP_Command.cap_goal(error, goal_max_lines, "error") else "")))
+          val failed = s"`$method` failed in the diagnostic run" +
+            (if (error.nonEmpty) ": " + PIDE_MCP_Command.cap_goal(error, goal_max_lines, "error") else "")
+          if (goal.nonEmpty)
+            JSON_Object("interim_goal" -> PIDE_MCP_Command.cap_goal(goal, goal_max_lines),
+              "interim_goal_hint" -> (failed + "; this is the goal state after its last step"))
+          else JSON_Object("interim_goal" -> failed)
         case _ =>
           JSON_Object("interim_goal" -> ("unavailable" + (if (error.nonEmpty) ": " + error else "")))
       }
+    }
   }
 
   // the command before cmd (the state after it is the goal of cmd)

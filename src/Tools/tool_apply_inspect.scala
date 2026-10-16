@@ -31,7 +31,7 @@ class Tool_Apply_Inspect extends PIDE_MCP_Tool("apply_inspect") {
     "goal_max_lines", "Lines shown of the goal state (a blown-up goal is cut with a marker; also caps characters). 0: no cap.", PIDE_MCP_Step_Limit.goal_max_lines,
     minimum = Some(0))
   private val max_uses_arg = PIDE_MCP_Tool_Arg.int_default(
-    "max_uses", "Maximum number of used theorems to list.", 30, minimum = Some(0))
+    "max_uses", "Maximum number of used theorems to list (most frequent first, each with `×N`: how often it was used).", 30, minimum = Some(0))
 
   def input_schema: JSON.Object.T = PIDE_MCP_Tool_Schema.input_schema(
     List(PIDE_MCP_Tool_Schema.running_session_arg, PIDE_MCP_Tool_Schema.origin_arg, start_line_arg, method_arg,
