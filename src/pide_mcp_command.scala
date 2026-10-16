@@ -24,7 +24,7 @@ object PIDE_MCP_Command {
     def key(status: String): String = "commands_" + status
 
     def prefix_keys(obj: JSON.Object.T): JSON.Object.T = {
-      val keys = all.toSet + "bad"
+      val keys = all.toSet + "bad" + "no_effect"
       obj.map { case (k, v) => if (keys.contains(k)) (key(k), v) else (k, v) }
     }
   }
@@ -231,6 +231,49 @@ object PIDE_MCP_Command {
     header.fold(cut)(_ + "\n" + cut)
   }
 
+  // the first informative line of a message: headers like "Type unification failed:" continue with the next line
+  def message_line(text: String): String =
+    text.linesIterator.map(_.trim).filter(_.nonEmpty).toList match {
+      case header :: next :: _ if header.endsWith(":") || header.endsWith(":\u2302") =>
+        header.stripSuffix("\u2302") + " " + next
+      case line :: _ => line
+      case Nil => ""
+    }
+
+  /* A proof command after a goal statement that failed runs in a skipped proof (Toplevel.Skipped_Proof, shown as the
+     state "skipped proof: depth N"): it has no goal and no effect, but finishes without errors. The cause is the
+     nearest failed goal statement before it, also outside the requested range. */
+  def is_skipped_proof(results: List[XML.Elem]): Boolean =
+    results.exists(r => Protocol.is_state(r) && PIDE_MCP_Util.elem_body_plain_text(r).startsWith("skipped proof"))
+
+  private val failed_statement_search = 5000
+
+  private def command_kind(snapshot: Document.Snapshot, c: Command): Option[String] =
+    snapshot.node.syntax.flatMap(_.keywords.kinds.get(c.span.name))
+
+  /* also a proof command without a state of its own (`done`, `qed`, `by`): right after a command in a skipped proof,
+     or after a failed theory goal statement (`lemma "..." by simp`) */
+  def in_skipped_proof(snapshot: Document.Snapshot, cmd: Command, results: List[XML.Elem]): Boolean =
+    is_skipped_proof(results) ||
+      command_kind(snapshot, cmd).exists(Keyword.proof) &&
+      Iterator.iterate(snapshot.node.commands.prev(cmd))(_.flatMap(snapshot.node.commands.prev))
+        .takeWhile(_.nonEmpty).map(_.get).find(!_.is_ignored).exists { prev =>
+          is_skipped_proof(snapshot.command_results(prev).iterator.collect { case (_, e: XML.Elem) => e }.toList) ||
+            command_kind(snapshot, prev).exists(Keyword.theory_goal) && status(snapshot, prev).is_failed
+        }
+
+  def failed_statement(snapshot: Document.Snapshot, cmd: Command): Option[Command] = {
+    def kind(c: Command): Option[String] = command_kind(snapshot, c)
+    def is_goal(c: Command): Boolean = kind(c).exists(k => Keyword.theory_goal(k) || Keyword.proof_goal(k))
+    Iterator.iterate(snapshot.node.commands.prev(cmd))(_.flatMap(snapshot.node.commands.prev))
+      .takeWhile(_.nonEmpty).map(_.get).take(failed_statement_search)
+      .filter(is_goal)
+      .map(c => (c, status(snapshot, c).is_failed))
+      // a goal statement that did not fail ends the search: then there is no failed one this command belongs to
+      .find { case (c, failed) => failed || kind(c).exists(Keyword.theory_goal) }
+      .collect { case (c, true) => c }
+  }
+
   private def classify_results(elements: Iterator[XML.Elem]): Map[String, List[String]] =
     elements.flatMap { elem =>
       val text = PIDE_MCP_Util.elem_body_plain_text(elem)
@@ -281,7 +324,7 @@ object PIDE_MCP_Command {
 
     val default_goal_max_lines: Int = 40
 
-    /* Problematic commands (running, warned, failed, canceled, bad, with errors or warnings) are listed once in
+    /* Problematic commands (running, warned, failed, canceled, bad, no_effect, with errors or warnings) are listed once in
        `problems`, with their kinds; the other commands in `commands`, up to limit. The kinds have counts only. */
     def states_json(
       states: Iterator[State],
@@ -301,11 +344,12 @@ object PIDE_MCP_Command {
         counts("bad") += state.bad.length
         counts("errors") += state.errors
         counts("warnings") += state.warnings
+        if (state.skipped_proof) counts("no_effect") += 1
         val problem_kinds = state.problem_kinds
         if (problem_kinds.nonEmpty) returned_problems += (state.json(doc, opts) + ("kinds" -> problem_kinds))
         else if (limit.forall(returned_commands.length < _)) returned_commands += state.json(doc, opts)
       }
-      val kinds = List(Status.running, Status.warned, Status.failed, Status.canceled, "bad",
+      val kinds = List(Status.running, Status.warned, Status.failed, Status.canceled, "bad", "no_effect",
         "errors", "warnings", Status.unprocessed, Status.finished)
       Status.prefix_keys(JSON_Object("total_timing_ms" -> total_timing_ms) ++
         JSON_Object(kinds.map(kind => kind -> counts(kind)))) +
@@ -358,9 +402,28 @@ object PIDE_MCP_Command {
       status.filter(flag => flag != Status.unprocessed && flag != Status.finished) :::
         List(
           Option.when(interrupted_at.nonEmpty)("interrupted_at_limit"),
+          Option.when(skipped_proof)("no_effect"),
           Option.when(bad.nonEmpty)("bad"),
           Option.when(errors > 0)("errors"),
           Option.when(warnings > 0)("warnings")).flatten
+
+    lazy val skipped_proof: Boolean = in_skipped_proof(snapshot, cmd, results)
+
+    // why a command in a skipped proof has no effect: its failed statement, with the first line of the error
+    def no_effect(doc: Line.Document): Option[String] =
+      Option.when(skipped_proof) {
+        failed_statement(snapshot, cmd) match {
+          case Some(c) =>
+            val line = snapshot.node.command_start(c).fold("?")(o => doc.position(o).line1.toString)
+            val error =
+              snapshot.command_results(c).iterator.collect { case (_, e: XML.Elem) if Protocol.is_error(e) => e }
+                .nextOption().map(e => ": " + message_line(PIDE_MCP_Util.elem_body_plain_text(e))).getOrElse("")
+            s"the statement at line $line (`${c.span.name}`) failed$error; this command runs in a skipped proof, " +
+              "without a goal, so it has no effect: fix the statement first"
+          case None =>
+            "this command runs in a skipped proof, without a goal, so it has no effect (probably a failed statement before it)"
+        }
+      }
 
     // the real run, also for a forked proof (which PIDE does not time) while it runs
     lazy val timing_ms: Long =
@@ -377,6 +440,7 @@ object PIDE_MCP_Command {
         List(
           Some("status" -> status),
           Some("timing_ms" -> timing_ms),
+          no_effect(doc).map("no_effect" -> _),
           interrupted_at.map("interrupted_at_limit_seconds" -> _),
           interrupted_at.map(_ => "hint" -> PIDE_MCP_Step_Limit.retry_note(source_line))) :::
         interrupted_at.toList.flatMap(_ =>

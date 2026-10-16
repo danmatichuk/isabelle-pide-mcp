@@ -8,6 +8,10 @@ New in this PIDE MCP version
     with all its `kinds` (e.g. `failed, canceled, interrupted_at_limit`); the kinds have counts only, and `commands` (cut by
     `commands_limit`) has the other commands. Before, such a command was repeated in every `commands_<kind>` list and in
     `commands`, with its goal each time. INCOMPATIBILITY.
+* `get_state` marks the proof commands of a goal statement that failed with the kind `no_effect` (count `commands_no_effect`):
+    they run in a skipped proof, without a goal, and finish without errors (`goal: skipped proof: depth 0`), which read as
+    success. The field `no_effect` names the failed statement and the first line of its error, also when it is outside the
+    requested range. This also covers `done`/`qed` and the `by` of a one-line `lemma "..." by m`.
 * `get_state` has `goal_max_lines` (default 40, also 200 characters per line) for each goal, interim goal, error and warning:
     a goal of 30 lines or more starts with its size and subgoal count, one of 200 lines or more is marked VERY LARGE (a method
     blew the term up), and a longer one is cut with `(+N more lines, M characters, K subgoals; raise goal_max_lines)`; also with

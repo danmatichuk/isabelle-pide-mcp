@@ -34,7 +34,7 @@ class Tool_Get_State extends PIDE_MCP_Tool("get_state") {
   private val commands_limit_arg = PIDE_MCP_Tool_Arg.opt_int(
     "commands_limit",
     "Maximum number of unproblematic commands to return in `commands`. Omit to return all commands. " +
-      "Problematic commands (running, warned, failed, canceled, bad, with errors or warnings) are always listed once in `problems`, with their `kinds`. " +
+      "Problematic commands (running, warned, failed, canceled, bad, no_effect: in the proof of a failed statement, with errors or warnings) are always listed once in `problems`, with their `kinds`. " +
       "**Set to 0 whenever you only want to get summary information (e.g. to see if there are any errors, warnings, etc.).** " +
       "Note that the returned summary will count all commands, even the truncated ones. " +
       "Warning: for large ranges, there are thousands of commands that may flood your context. Set the commands limit to 0 if you do not need details.",
