@@ -4,6 +4,11 @@ PIDE MCP NEWS -- history of user-relevant changes
 New in this PIDE MCP version
 ----------------------------
 
+* New tool `set_step_time_limit` (`milliseconds`, 0: no limit; optional `session`) changes the time limit for proof steps of a
+    running session from now on, without a restart: running steps are checked against the new limit at once, and after raising
+    or removing it the steps interrupted at the lower limit run again (in each theory the first one, which re-runs the commands
+    after it). The result has the old and the new value and the re-run steps. The hint of an interrupted step mentions it next to
+    `retry_without_limit`. The default stays 5 s (pide_mcp_step_time_limit).
 * `get_state` lists each problematic command (running, warned, failed, canceled, bad, with errors or warnings) once in `problems`,
     with all its `kinds` (e.g. `failed, canceled, interrupted_at_limit`); the kinds have counts only, and `commands` (cut by
     `commands_limit`) has the other commands. Before, such a command was repeated in every `commands_<kind>` list and in

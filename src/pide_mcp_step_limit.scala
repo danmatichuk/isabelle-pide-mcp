@@ -2,6 +2,7 @@
 
 A time limit for proof steps (pide_mcp_step_time_limit, default 5 s; 0: none): a step (`apply`, `by`, `proof`,
 `qed`, `done`, `.`, `..`) whose real run reaches the limit is interrupted and shown as canceled.
+`set_step_time_limit` changes the limit of a running session.
 `retry_without_limit` lets the command run again without the limit, once: the permission belongs to that
 evaluation of the command, an edit of it (a new command) or a re-evaluation has the limit again. Only the MCP's
 PIDE sessions are affected, not batch builds or the user's editor.
@@ -58,8 +59,8 @@ object PIDE_MCP_Step_Limit {
   private[mcp] val retries = Synchronized(List.empty[Retry])
 
   def retry_note(line: Int): String =
-    s"retry without the limit: `retry_without_limit` with this file and start_line $line; " +
-      "or replace the step by a cheaper one"
+    s"retry this step once without the limit: `retry_without_limit` with this file and start_line $line; " +
+      "raise the limit for all steps: `set_step_time_limit`; or replace the step by a cheaper one"
 
   /* interim goals: the goal state that the method of an interrupted step has reached after a moment (apply_inspect) */
 
@@ -216,7 +217,8 @@ object PIDE_MCP_Step_Limit {
 class PIDE_MCP_Step_Limit(session: PIDE_MCP_Session) {
   import PIDE_MCP_Step_Limit._
 
-  val limit: Double = session.options.real("pide_mcp_step_time_limit")
+  @volatile private var _limit: Double = session.options.real("pide_mcp_step_time_limit")
+  def limit: Double = _limit
 
   @volatile private var active = true
 
@@ -254,14 +256,19 @@ class PIDE_MCP_Step_Limit(session: PIDE_MCP_Session) {
       case _ =>
     }
 
-  if (limit > 0) session.session.commands_changed += consumer
+  // also without a limit: it can be set later (set_step_time_limit), and the steps running then are known
+  session.session.commands_changed += consumer
 
-  private val watcher =
-    if (limit <= 0) None
-    else Some(Isabelle_Thread.fork(name = s"pide_mcp_step_limit_${session.id}", daemon = true) {
+  // the threads start with the first limit > 0
+  private lazy val watcher: Thread =
+    Isabelle_Thread.fork(name = s"pide_mcp_step_limit_${session.id}", daemon = true) {
       Exn.result {
         while (active) {
-          for ((k, (cmd, node_name)) <- running.value if !unlimited.value(k) && !interrupted.value.contains(k)) {
+          val limit = this.limit
+          for {
+            (k, (cmd, node_name)) <- running.value
+            if limit > 0 && !unlimited.value(k) && !interrupted.value.contains(k)
+          } {
             Exn.result(session.node_snapshot(node_name)) match {
               case Exn.Res(snapshot) =>
                 val status = PIDE_MCP_Command.status(snapshot, cmd)
@@ -288,7 +295,7 @@ class PIDE_MCP_Step_Limit(session: PIDE_MCP_Session) {
         }
       }
       ()
-    })
+    }
 
   /* An interrupted step that still shows as running after close_grace may have stopped without its closing status:
      the helper's protocol command sends that status if the prover confirms that the evaluation has stopped (otherwise
@@ -341,9 +348,8 @@ class PIDE_MCP_Step_Limit(session: PIDE_MCP_Session) {
   lazy val helper_loaded: Boolean =
     List("Main", "HOL.Main").exists(session.resources.loaded_theory) && load_theory(helper)
 
-  private val interim_worker =
-    if (limit <= 0) None
-    else Some(Isabelle_Thread.fork(name = s"pide_mcp_interim_goal_${session.id}", daemon = true) {
+  private lazy val interim_worker: Thread =
+    Isabelle_Thread.fork(name = s"pide_mcp_interim_goal_${session.id}", daemon = true) {
       Exn.result {
         // the close helper (Pure) first, in every session
         close_state.change(_ => Some(load_theory(close_helper)))
@@ -368,7 +374,42 @@ class PIDE_MCP_Step_Limit(session: PIDE_MCP_Session) {
         }
       }
       ()
-    })
+    }
+
+  private def start(): Unit = synchronized { watcher; interim_worker }
+
+  if (limit > 0) start()
+
+  /* Change the limit from now on: running steps are checked against it at once; steps interrupted at a lower
+     limit than the new one run again (the first one in each theory, which re-runs the commands after it). Result:
+     the old limit, and the re-run steps (theory, command, offset). */
+  def set_limit(seconds: Double, progress: Progress): (Double, List[(Document.Node.Name, Command, Text.Offset)]) = {
+    val old = synchronized {
+      val old = _limit
+      _limit = seconds
+      old
+    }
+    if (seconds > 0) start()
+    def below(at: Double): Boolean = seconds <= 0 || at < seconds
+    val rerun =
+      if (seconds > 0 && seconds <= old) Nil
+      else {
+        val nodes = session.snapshot().version.nodes.iterator.map(_._1)
+          .filter(name => name.is_theory && !session.is_base_session_theory(name)).toList
+        nodes.flatMap { name =>
+          Exn.result(session.node_snapshot(name)) match {
+            case Exn.Res(snapshot) =>
+              snapshot.node.command_iterator().find { case (cmd, _) =>
+                interrupted_at(snapshot, cmd).exists(below) && !PIDE_MCP_Command.status(snapshot, cmd).is_running
+              }.map { case (cmd, start) => (name, cmd, start) }
+            case Exn.Exn(exn) if Exn.is_interrupt(exn) => throw exn
+            case Exn.Exn(_) => None
+          }
+        }
+      }
+    for ((name, cmd, start) <- rerun) session.reevaluate(name, Text.Range(start, start + cmd.length), progress)
+    (old, rerun)
+  }
 
   def stop(): Unit = {
     active = false

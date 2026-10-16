@@ -38,6 +38,7 @@ sources = \
   src/Tools/tool_list_sessions.scala \
   src/Tools/tool_read.scala \
   src/Tools/tool_retry_without_limit.scala \
+  src/Tools/tool_set_step_time_limit.scala \
   src/Tools/tool_start_session.scala \
   src/Tools/tool_stop_session.scala \
   src/Tools/tool_unload.scala
@@ -53,6 +54,7 @@ services = \
   isabelle.pide.mcp.Tools_List_Sessions \
   isabelle.pide.mcp.Tools_Read \
   isabelle.pide.mcp.Tools_Retry_Without_Limit \
+  isabelle.pide.mcp.Tools_Set_Step_Time_Limit \
   isabelle.pide.mcp.Tools_Start_Session \
   isabelle.pide.mcp.Tools_Stop_Session \
   isabelle.pide.mcp.Tools_Unload
