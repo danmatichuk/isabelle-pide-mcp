@@ -33,17 +33,22 @@ class Tool_Get_State extends PIDE_MCP_Tool("get_state") {
     false)
   private val commands_limit_arg = PIDE_MCP_Tool_Arg.opt_int(
     "commands_limit",
-    "Maximum number of unproblematic commands to return. Omit to return all commands. " +
+    "Maximum number of unproblematic commands to return in `commands`. Omit to return all commands. " +
+      "Problematic commands (running, warned, failed, canceled, bad, with errors or warnings) are always listed once in `problems`, with their `kinds`. " +
       "**Set to 0 whenever you only want to get summary information (e.g. to see if there are any errors, warnings, etc.).** " +
       "Note that the returned summary will count all commands, even the truncated ones. " +
       "Warning: for large ranges, there are thousands of commands that may flood your context. Set the commands limit to 0 if you do not need details.",
     minimum = Some(0))
+  private val goal_max_lines_arg = PIDE_MCP_Tool_Arg.int_default(
+    "goal_max_lines",
+    "Lines shown per goal, interim goal, error, and warning (a goal blown up by a method is cut with a marker; also caps characters, 200 per line). 0: no cap.",
+    PIDE_MCP_Command.State.default_goal_max_lines, minimum = Some(0))
 
   def input_schema: JSON.Object.T = PIDE_MCP_Tool_Schema.input_schema(
     List(PIDE_MCP_Tool_Schema.running_session_arg, PIDE_MCP_Tool_Schema.origin_arg,
       PIDE_MCP_Tool_Schema.opt_start_line_arg, PIDE_MCP_Tool_Schema.opt_end_line_arg,
       include_types_arg, include_facts_arg, include_infos_arg, include_full_markup_arg,
-      commands_limit_arg))
+      commands_limit_arg, goal_max_lines_arg))
 
   override def annotations: Option[JSON.Object.T] = Some(JSON_Object("readOnlyHint" -> true))
 
@@ -81,7 +86,7 @@ class Tool_Get_State extends PIDE_MCP_Tool("get_state") {
         PIDE_MCP_Tool_Util.resolve_lines(opt_start_line, opt_end_line, doc.lines.length)
       val opts = PIDE_MCP_Command.State.Options(
         include_types_arg.get(args), include_facts_arg.get(args),
-        include_infos_arg.get(args), include_full_markup_arg.get(args))
+        include_infos_arg.get(args), include_full_markup_arg.get(args), goal_max_lines_arg.get(args))
       val commands_limit = commands_limit_arg.get(args)
       val range = PIDE_MCP_Util.text_range(doc, start_line, end_line).get
       val states = PIDE_MCP_Command.State.states(snapshot, Some(range))

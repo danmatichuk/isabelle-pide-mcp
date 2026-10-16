@@ -70,13 +70,7 @@ object PIDE_MCP_Step_Limit {
   val helper: String = "$PIDE_MCP_HOME/ml/PIDE_MCP_Apply_Inspect.thy"
   val helper_import: String = "\"$PIDE_MCP_HOME/ml/PIDE_MCP_Apply_Inspect\""
   val operation: String = "pide_mcp_apply_inspect"
-  val goal_max_lines: Int = 40
-
-  def cap_lines(text: String, max_lines: Int): String = {
-    val lines = Line.logical_lines(text)
-    if (max_lines <= 0 || lines.length <= max_lines) text
-    else (lines.take(max_lines) :+ s"... (+${lines.length - max_lines} lines)").mkString("\n")
-  }
+  val goal_max_lines: Int = PIDE_MCP_Command.State.default_goal_max_lines
 
   sealed case class Interim(
     method: String,
@@ -88,12 +82,12 @@ object PIDE_MCP_Step_Limit {
     loops: List[String] = Nil
   ) {
     // as part of an interrupted step (line) in get_state
-    def interim_json(line: Int): JSON.Object.T =
+    def interim_json(line: Int, goal_max_lines: Int = goal_max_lines): JSON.Object.T =
       outcome match {
         case "pending" =>
           JSON_Object("interim_goal" -> s"pending: `$method` runs again with apply_inspect")
         case "traced" =>
-          JSON_Object("interim_goal_after_ms" -> time_ms, "interim_goal" -> cap_lines(goal, goal_max_lines)) ++
+          JSON_Object("interim_goal_after_ms" -> time_ms, "interim_goal" -> PIDE_MCP_Command.cap_goal(goal, goal_max_lines)) ++
             JSON_Object.if_proper(loops.nonEmpty, JSON_Object("interim_loops" -> loops)) ++
             JSON_Object("interim_goal_hint" ->
               (s"the goal state that `$method` had reached after about $time_ms ms (apply_inspect; within a simp " +
@@ -102,7 +96,8 @@ object PIDE_MCP_Step_Limit {
         case "finished" =>
           JSON_Object("interim_goal" -> s"`$method` finished in the diagnostic run within $time_ms ms")
         case "failed" =>
-          JSON_Object("interim_goal" -> (s"`$method` failed in the diagnostic run" + (if (error.nonEmpty) ": " + error else "")))
+          JSON_Object("interim_goal" -> (s"`$method` failed in the diagnostic run" +
+            (if (error.nonEmpty) ": " + PIDE_MCP_Command.cap_goal(error, goal_max_lines, "error") else "")))
         case _ =>
           JSON_Object("interim_goal" -> ("unavailable" + (if (error.nonEmpty) ": " + error else "")))
       }

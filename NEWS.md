@@ -4,6 +4,14 @@ PIDE MCP NEWS -- history of user-relevant changes
 New in this PIDE MCP version
 ----------------------------
 
+* `get_state` lists each problematic command (running, warned, failed, canceled, bad, with errors or warnings) once in `problems`,
+    with all its `kinds` (e.g. `failed, canceled, interrupted_at_limit`); the kinds have counts only, and `commands` (cut by
+    `commands_limit`) has the other commands. Before, such a command was repeated in every `commands_<kind>` list and in
+    `commands`, with its goal each time. INCOMPATIBILITY.
+* `get_state` has `goal_max_lines` (default 40, also 200 characters per line) for each goal, interim goal, error and warning:
+    a goal of 30 lines or more starts with its size and subgoal count, one of 200 lines or more is marked VERY LARGE (a method
+    blew the term up), and a longer one is cut with `(+N more lines, M characters, K subgoals; raise goal_max_lines)`; also with
+    `commands_limit: 0`. The `apply_inspect` tool caps its goal in the same way.
 * `edit` keeps the lines outside the edited range byte for byte (before, the whole file was symbol-encoded on write, so literal
     Unicode symbols elsewhere turned into `\<Longrightarrow>` etc.); `old_text` is matched with symbols in Unicode form.
 * `edit` refuses unknown arguments (nothing is done); other tools note them in the result (before, they were ignored silently).

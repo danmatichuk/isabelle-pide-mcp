@@ -183,10 +183,52 @@ object PIDE_MCP_Command {
 
   def message_entries(
     elements: Iterator[XML.Elem],
-    kinds: List[String]
+    kinds: List[String],
+    goal_max_lines: Option[Int] = None
   ): List[Option[JSON.Object.Entry]] = {
     val texts = classify_results(elements)
-    kinds.map(kind => texts.get(kind).map(kind -> _))
+    kinds.map(kind => texts.get(kind).map { messages =>
+      kind -> (
+        // errors embed goals too (`Failed to apply proof method`, `Failed to finish proof`): capped in the same way
+        if (goal_max_lines.nonEmpty && (kind == "goal" || kind == "error" || kind == "warning"))
+          messages.map(cap_goal(_, goal_max_lines.get, if (kind == "goal") "goal" else kind))
+        else messages)
+    })
+  }
+
+  /* Goals that a method blew up (thousands of lines, or one line of 100k characters) flood the context: say how large a
+     big goal is, and cut it after max_lines lines (and max_lines * 200 characters). */
+  val goal_size_note_lines: Int = 30
+  val goal_warning_lines: Int = 200
+
+  private val Subgoals = """goal \((\d+) subgoals?\)""".r.unanchored
+  private val Subgoal_Line = """ \d+\. .*""".r
+
+  def cap_goal(text: String, max_lines: Int, label: String = "goal"): String = {
+    val lines = text.linesIterator.toList
+    val n = lines.length
+    val chars = text.length
+    val max_chars = max_lines.toLong * 200
+    val large = n >= goal_warning_lines || chars >= goal_warning_lines * 200
+    // from the header "goal (N subgoals)", or else (an interim goal) its numbered subgoals
+    val subgoals =
+      (text match {
+        case Subgoals(k) => Some(k.toInt)
+        case _ => Some(lines.count(Subgoal_Line.matches)).filter(_ > 0)
+      }).fold("")(k => s", $k subgoal${if (k == 1) "" else "s"}")
+    val header =
+      Option.when(n >= goal_size_note_lines || large)(
+        s"($label: $n lines, $chars characters$subgoals" +
+          (if (large) "; VERY LARGE: the method probably blew the term up" else "") + ")")
+    val cut =
+      if (max_lines <= 0 || n <= max_lines && chars <= max_chars) text
+      else {
+        val kept = lines.take(max_lines).mkString("\n")
+        val kept1 = if (kept.length > max_chars) kept.take(max_chars.toInt) else kept
+        val rest = n - kept1.linesIterator.length
+        kept1 + s"\n... (+$rest more lines, ${chars - kept1.length} characters$subgoals; raise goal_max_lines)"
+      }
+    header.fold(cut)(_ + "\n" + cut)
   }
 
   private def classify_results(elements: Iterator[XML.Elem]): Map[String, List[String]] =
@@ -237,49 +279,38 @@ object PIDE_MCP_Command {
         }
       }
 
+    val default_goal_max_lines: Int = 40
+
+    /* Problematic commands (running, warned, failed, canceled, bad, with errors or warnings) are listed once in
+       `problems`, with their kinds; the other commands in `commands`, up to limit. The kinds have counts only. */
     def states_json(
       states: Iterator[State],
       doc: Line.Document,
       opts: Options,
       limit: Option[Int]
     ): JSON.Object.T = {
-      val cmd_counts = mutable.Map[String, Int]().withDefaultValue(0)
-      val cmd_details = mutable.Map[String, mutable.ListBuffer[JSON.T]]()
+      val counts = mutable.Map[String, Int]().withDefaultValue(0)
       val returned_commands = new mutable.ListBuffer[JSON.Object.T]
+      val returned_problems = new mutable.ListBuffer[JSON.Object.T]
       var total_timing_ms = 0L
       var count = 0
       for (state <- states) {
-        lazy val state_json = state.json(doc, opts)
-        if (limit.forall(count < _)) returned_commands += state_json
         count += 1
         total_timing_ms += state.timing_ms
-        def count_detail(key: String, count: Int, detail: Boolean): Unit =
-          if (count > 0) {
-            cmd_counts(key) += count
-            if (detail)
-              cmd_details.getOrElseUpdate(key, new mutable.ListBuffer[JSON.T]) += state_json
-          }
-        for (flag <- state.status)
-          count_detail(flag, 1, flag != Status.unprocessed && flag != Status.finished)
-        count_detail("bad", state.bad.length, true)
-        count_detail("errors", state.errors, true)
-        count_detail("warnings", state.warnings, true)
+        for (flag <- state.status) counts(flag) += 1
+        counts("bad") += state.bad.length
+        counts("errors") += state.errors
+        counts("warnings") += state.warnings
+        val problem_kinds = state.problem_kinds
+        if (problem_kinds.nonEmpty) returned_problems += (state.json(doc, opts) + ("kinds" -> problem_kinds))
+        else if (limit.forall(returned_commands.length < _)) returned_commands += state.json(doc, opts)
       }
-      def detail_entry(key: String): (String, JSON.T) = key -> JSON_Object(
-        "count" -> cmd_counts(key),
-        "commands" -> cmd_details.get(key).map(_.toList).getOrElse(Nil))
-      Status.prefix_keys(JSON_Object(
-        "total_timing_ms" -> total_timing_ms,
-        detail_entry(Status.running),
-        detail_entry(Status.warned),
-        detail_entry(Status.failed),
-        detail_entry(Status.canceled),
-        detail_entry("bad"),
-        detail_entry("errors"),
-        detail_entry("warnings"),
-        Status.unprocessed -> cmd_counts(Status.unprocessed),
-        Status.finished -> cmd_counts(Status.finished))) +
-        ("commands" -> JSON_Object("count" -> count,
+      val kinds = List(Status.running, Status.warned, Status.failed, Status.canceled, "bad",
+        "errors", "warnings", Status.unprocessed, Status.finished)
+      Status.prefix_keys(JSON_Object("total_timing_ms" -> total_timing_ms) ++
+        JSON_Object(kinds.map(kind => kind -> counts(kind)))) +
+        ("problems" -> JSON_Object("count" -> returned_problems.length, "problems" -> returned_problems.toList)) +
+        ("commands" -> JSON_Object("count" -> (count - returned_problems.length),
           "count_returned" -> returned_commands.length, "commands" -> returned_commands.toList))
     }
 
@@ -287,7 +318,8 @@ object PIDE_MCP_Command {
       include_types: Boolean = false,
       include_facts: Boolean = false,
       include_infos: Boolean = false,
-      include_full_markup: Boolean = false
+      include_full_markup: Boolean = false,
+      goal_max_lines: Int = default_goal_max_lines
     )
   }
 
@@ -322,6 +354,14 @@ object PIDE_MCP_Command {
       }
       if (interrupted_at.nonEmpty && !list.contains(Status.canceled)) list :+ Status.canceled else list
     }
+    lazy val problem_kinds: List[String] =
+      status.filter(flag => flag != Status.unprocessed && flag != Status.finished) :::
+        List(
+          Option.when(interrupted_at.nonEmpty)("interrupted_at_limit"),
+          Option.when(bad.nonEmpty)("bad"),
+          Option.when(errors > 0)("errors"),
+          Option.when(warnings > 0)("warnings")).flatten
+
     // the real run, also for a forked proof (which PIDE does not time) while it runs
     lazy val timing_ms: Long =
       cmd_status.timings.sum(Date.now()).ms max
@@ -340,13 +380,13 @@ object PIDE_MCP_Command {
           interrupted_at.map("interrupted_at_limit_seconds" -> _),
           interrupted_at.map(_ => "hint" -> PIDE_MCP_Step_Limit.retry_note(source_line))) :::
         interrupted_at.toList.flatMap(_ =>
-          PIDE_MCP_Step_Limit.interim(snapshot, cmd).toList.flatMap(_.interim_json(source_line).toList.map(Some(_)))) :::
+          PIDE_MCP_Step_Limit.interim(snapshot, cmd).toList.flatMap(_.interim_json(source_line, opts.goal_max_lines).toList.map(Some(_)))) :::
         List(
           interrupt_sent_seconds.map("interrupt_sent_seconds" -> _),
           Option.when(no_time_limit)("no_time_limit" -> true),
           Some("source" -> PIDE_MCP_Util.numbered_lines(source, source_line)),
           proper_list(bad).map("bad" -> _)) :::
-        message_entries(results.iterator, Message_Kind.important) :::
+        message_entries(results.iterator, Message_Kind.important, goal_max_lines = Some(opts.goal_max_lines)) :::
         List(
           Option.when(opts.include_types)(
             proper_list(types_json(snapshot, range)).map("types" -> _)).flatten,

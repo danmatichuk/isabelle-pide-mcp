@@ -27,7 +27,7 @@ class Tool_Apply_Inspect extends PIDE_MCP_Tool("apply_inspect") {
     "timeout_ms", "apply_inspect's timeout: stop the method after this many milliseconds and return the goal state reached then.",
     200, minimum = Some(1), maximum = Some(60000))
   private val goal_max_lines_arg = PIDE_MCP_Tool_Arg.int_default(
-    "goal_max_lines", "Maximum number of lines of the goal state (0: all).", PIDE_MCP_Step_Limit.goal_max_lines,
+    "goal_max_lines", "Lines shown of the goal state (a blown-up goal is cut with a marker; also caps characters). 0: no cap.", PIDE_MCP_Step_Limit.goal_max_lines,
     minimum = Some(0))
   private val max_uses_arg = PIDE_MCP_Tool_Arg.int_default(
     "max_uses", "Maximum number of used theorems to list.", 30, minimum = Some(0))
@@ -73,14 +73,15 @@ class Tool_Apply_Inspect extends PIDE_MCP_Tool("apply_inspect") {
         (result.outcome match {
           case "traced" => JSON_Object("time_ms" -> result.time_ms)  // when the run ended, shortly after the timeout
           case "finished" => JSON_Object("note" -> s"the method finished within $timeout_ms ms (no intermediate state)")
-          case _ => JSON_Object.if_proper(result.error.nonEmpty, JSON_Object("error" -> result.error))
+          case _ => JSON_Object.if_proper(result.error.nonEmpty,
+            JSON_Object("error" -> PIDE_MCP_Command.cap_goal(result.error, goal_max_lines_arg.get(args), "error")))
         }) ++
         JSON_Object.if_proper(result.loops.nonEmpty, JSON_Object("loops" -> result.loops)) ++
         JSON_Object("theorems_used" ->
           (shown_uses ::: (if (result.uses.length > shown_uses.length)
             List(s"... (+${result.uses.length - shown_uses.length} more; max_uses)") else Nil))) ++
         JSON_Object.if_proper(result.outcome == "traced",
-          JSON_Object("goal" -> PIDE_MCP_Step_Limit.cap_lines(result.goal, goal_max_lines_arg.get(args))))
+          JSON_Object("goal" -> PIDE_MCP_Command.cap_goal(result.goal, goal_max_lines_arg.get(args))))
     }
 }
 
