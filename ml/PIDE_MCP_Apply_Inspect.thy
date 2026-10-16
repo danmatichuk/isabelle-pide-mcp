@@ -42,9 +42,10 @@ fun plain prt =
 fun goal_text st =
   Pretty.string_of (Goal_Display.pretty_goal (Proof.context_of st) (#goal (Proof.goal st)));
 
-(*args: method, time in ms (empty: apply_inspect_trace_start). The method runs like apply_inspect on the
-  proof state, with that time as both its time limit and the start of the trace: the result is the one
-  goal state that it has reached then (within a simp call, the term it has rewritten to).
+(*args: method, timeout in ms (empty: apply_inspect_trace_start). The method runs like apply_inspect on the
+  proof state, with that time as its timeout and as the start of the trace: as the trace takes samples only
+  before the timeout, there are none, and the result is the goal state at the end of the run itself (frozen at
+  the timeout; within a simp call, the term it has rewritten to), without a replay.
   Lines: "outcome: traced|finished|failed", "time_ms: N", "error: ...", "loop: ..." (loop warnings),
   "uses:" and "  theorem" lines (theorems used until then, without infrastructure), "goal:" and the goal*)
 fun inspect_at [method_arg, time_arg] state =

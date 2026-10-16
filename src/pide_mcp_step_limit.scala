@@ -98,7 +98,7 @@ object PIDE_MCP_Step_Limit {
             JSON_Object("interim_goal_hint" ->
               (s"the goal state that `$method` had reached after about $time_ms ms (apply_inspect; within a simp " +
                 "call the term it had rewritten to). For the state at another time, without changing the file: " +
-                s"the `apply_inspect` tool with this file, start_line $line and after_ms (e.g. 1000)"))
+                s"the `apply_inspect` tool with this file, start_line $line and timeout_ms (e.g. 1000)"))
         case "finished" =>
           JSON_Object("interim_goal" -> s"`$method` finished in the diagnostic run within $time_ms ms")
         case "failed" =>
