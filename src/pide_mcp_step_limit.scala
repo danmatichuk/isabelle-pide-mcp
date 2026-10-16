@@ -11,9 +11,10 @@ Sometimes the interrupted evaluation stops, but its closing status never arrives
 as running: then the server sends that status itself (PIDE_MCP.close_exec of the helper theory
 ml/PIDE_MCP_Close.thy), once the prover confirms that the evaluation has stopped.
 
-After the interrupt, the step's method runs again on the goal before the step, like `apply_inspect` with the
-limits of the helper theory ml/PIDE_MCP_Apply_Inspect.thy (at most 5 s, goal states recorded from 200 ms on):
-`get_state` shows the first recorded goal state, the interim goal.
+Once a step has run for pide_mcp_interim_goal_after_ms (default 5000; 0: never), or when it is interrupted, its method
+runs again on the goal before the step, like `apply_inspect` with the limits of the helper theory
+ml/PIDE_MCP_Apply_Inspect.thy (goal state after 200 ms): `get_state` shows that goal state, the interim goal, also
+while the step still runs. The step itself is not interrupted for it.
 */
 
 package isabelle.pide.mcp
@@ -60,7 +61,8 @@ object PIDE_MCP_Step_Limit {
 
   def retry_note(line: Int): String =
     s"retry this step once without the limit: `retry_without_limit` with this file and start_line $line; " +
-      "raise the limit for all steps: `set_step_time_limit`; or replace the step by a cheaper one"
+      "raise the limit for all steps: `set_step_time_limit` (the interim goal still comes after " +
+      "interim_goal_after_milliseconds, also below a raised limit); or replace the step by a cheaper one"
 
   /* interim goals: the goal state that the method of an interrupted step has reached after a moment (apply_inspect) */
 
@@ -72,6 +74,7 @@ object PIDE_MCP_Step_Limit {
   val helper_import: String = "\"$PIDE_MCP_HOME/ml/PIDE_MCP_Apply_Inspect\""
   val operation: String = "pide_mcp_apply_inspect"
   val goal_max_lines: Int = PIDE_MCP_Command.State.default_goal_max_lines
+  val uses_shown: Int = 10
 
   sealed case class Interim(
     method: String,
@@ -85,11 +88,16 @@ object PIDE_MCP_Step_Limit {
     // as part of an interrupted step (line) in get_state
     def interim_json(line: Int, goal_max_lines: Int = goal_max_lines): JSON.Object.T = {
       val within = if (time_ms > 0) s" within $time_ms ms" else ""  // a finished run has no time
-      outcome match {
+      // theorems used in the diagnostic run, most frequent first, with how often
+      val uses_json =
+        JSON_Object.if_proper(uses.nonEmpty, JSON_Object("interim_theorems_used" ->
+          (uses.take(uses_shown) ::: (if (uses.length > uses_shown)
+            List(s"... (+${uses.length - uses_shown} more; the `apply_inspect` tool lists more)") else Nil))))
+      (outcome match {
         case "pending" =>
           JSON_Object("interim_goal" -> s"pending: `$method` runs again with apply_inspect")
         case "traced" =>
-          JSON_Object("interim_goal_after_ms" -> time_ms, "interim_goal" -> PIDE_MCP_Command.cap_goal(goal, goal_max_lines)) ++
+          JSON_Object("interim_goal_time_ms" -> time_ms, "interim_goal" -> PIDE_MCP_Command.cap_goal(goal, goal_max_lines)) ++
             JSON_Object.if_proper(loops.nonEmpty, JSON_Object("interim_loops" -> loops)) ++
             JSON_Object("interim_goal_hint" ->
               (s"the goal state that `$method` had reached after about $time_ms ms (apply_inspect; within a simp " +
@@ -110,7 +118,7 @@ object PIDE_MCP_Step_Limit {
           else JSON_Object("interim_goal" -> failed)
         case _ =>
           JSON_Object("interim_goal" -> ("unavailable" + (if (error.nonEmpty) ": " + error else "")))
-      }
+      }) ++ (if (outcome == "pending") JSON_Object() else uses_json)
     }
   }
 
@@ -161,6 +169,8 @@ object PIDE_MCP_Step_Limit {
 
   def interim(snapshot: Document.Snapshot, cmd: Command): Option[Interim] =
     key(snapshot, cmd).flatMap(interims.value.get)
+
+  private def has_interim(key: Key): Boolean = interims.value.contains(key)
 
   private def set_interim(key: Key, interim: Interim): Unit =
     interims.change(m => (if (m.size >= keep) m.drop(m.size - keep + 1) else m) + (key -> interim))
@@ -220,6 +230,10 @@ class PIDE_MCP_Step_Limit(session: PIDE_MCP_Session) {
   @volatile private var _limit: Double = session.options.real("pide_mcp_step_time_limit")
   def limit: Double = _limit
 
+  // when the interim goal of a running step is computed (ms; 0: never, also not at an interrupt)
+  @volatile private var _interim_after_ms: Long = session.options.int("pide_mcp_interim_goal_after_ms").toLong max 0L
+  def interim_after_ms: Long = _interim_after_ms
+
   @volatile private var active = true
 
   // running steps of the current evaluations
@@ -259,15 +273,25 @@ class PIDE_MCP_Step_Limit(session: PIDE_MCP_Session) {
   // also without a limit: it can be set later (set_step_time_limit), and the steps running then are known
   session.session.commands_changed += consumer
 
-  // the threads start with the first limit > 0
+  // the interim goal of a step, once: for the evaluation k
+  private def queue_interim(k: Key, cmd: Command): Unit =
+    if (interim_after_ms > 0 && !has_interim(k)) {
+      for (m <- step_method(cmd) if helper_state.value != Some(false)) {
+        set_interim(k, Interim(m, "pending"))
+        pending.change(_ :+ (k, cmd, m))
+      }
+    }
+
+  // the threads start with the first limit or interim threshold > 0
   private lazy val watcher: Thread =
     Isabelle_Thread.fork(name = s"pide_mcp_step_limit_${session.id}", daemon = true) {
       Exn.result {
         while (active) {
           val limit = this.limit
+          val interim_after = interim_after_ms
           for {
             (k, (cmd, node_name)) <- running.value
-            if limit > 0 && !unlimited.value(k) && !interrupted.value.contains(k)
+            if (limit > 0 || interim_after > 0) && !interrupted.value.contains(k)
           } {
             Exn.result(session.node_snapshot(node_name)) match {
               case Exn.Res(snapshot) =>
@@ -275,17 +299,15 @@ class PIDE_MCP_Step_Limit(session: PIDE_MCP_Session) {
                 // the real run, also for a forked proof (`by` of a lemma), which PIDE does not time
                 lazy val running_ms =
                   status.timings.sum(Date.now()).ms max PIDE_MCP_Command.Running_Clock.elapsed_ms(snapshot, cmd)
-                if (PIDE_MCP_Step_Limit.key(snapshot, cmd).contains(k) && status.is_running &&
-                    running_ms >= (limit * 1000).toLong) {
+                val current = PIDE_MCP_Step_Limit.key(snapshot, cmd).contains(k) && status.is_running
+                if (current && limit > 0 && !unlimited.value(k) && running_ms >= (limit * 1000).toLong) {
                   interrupt(k, limit)
                   cancel_command(session, snapshot, cmd, running_ms)
                   val now = Time.now()
                   stopping.change(_ + (k -> (cmd, node_name, now, now)))
-                  for (m <- step_method(cmd) if helper_state.value != Some(false)) {
-                    set_interim(k, Interim(m, "pending"))
-                    pending.change(_ :+ (k, cmd, m))
-                  }
+                  queue_interim(k, cmd)
                 }
+                else if (current && interim_after > 0 && running_ms >= interim_after) queue_interim(k, cmd)
               case Exn.Exn(exn) if Exn.is_interrupt(exn) => throw exn
               case Exn.Exn(_) => running.change(_ - k)  // the node is gone (unloaded)
             }
@@ -378,7 +400,18 @@ class PIDE_MCP_Step_Limit(session: PIDE_MCP_Session) {
 
   private def start(): Unit = synchronized { watcher; interim_worker }
 
-  if (limit > 0) start()
+  if (limit > 0 || interim_after_ms > 0) start()
+
+  // from now on (0: never); the old value
+  def set_interim_after(ms: Long): Long = {
+    val old = synchronized {
+      val old = _interim_after_ms
+      _interim_after_ms = ms max 0L
+      old
+    }
+    if (ms > 0) start()
+    old
+  }
 
   /* Change the limit from now on: running steps are checked against it at once; steps interrupted at a lower
      limit than the new one run again (the first one in each theory, which re-runs the commands after it). Result:

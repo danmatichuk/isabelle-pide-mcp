@@ -4,6 +4,13 @@ PIDE MCP NEWS -- history of user-relevant changes
 New in this PIDE MCP version
 ----------------------------
 
+* The interim goal of a proof step has its own threshold, pide_mcp_interim_goal_after_ms (default 5000; 0: no interim goals):
+    once a step has run that long, its method runs again with apply_inspect, without interrupting the step, and `get_state`
+    shows the interim goal on the running step; at an interrupt it is computed only if the step has none yet. So raising the
+    step time limit does not delay it. `set_step_time_limit` has `interim_goal_after_milliseconds` to change it at runtime;
+    both its arguments are optional now. The field `interim_goal_after_ms` of a step is now `interim_goal_time_ms` (the time
+    of the goal state in the diagnostic run). Interim goals show the theorems used in the diagnostic run with how often
+    (`interim_theorems_used`, the 10 most frequent).
 * New tool `set_step_time_limit` (`milliseconds`, 0: no limit; optional `session`) changes the time limit for proof steps of a
     running session from now on, without a restart: running steps are checked against the new limit at once, and after raising
     or removing it the steps interrupted at the lower limit run again (in each theory the first one, which re-runs the commands
@@ -39,7 +46,7 @@ New in this PIDE MCP version
     the theorems used until then (without infrastructure, each with how often, `×N`, most frequent first) and loop warnings; for a method that finishes in time its resulting goal
     state, and for one that fails the state after its last step. The file is not changed (a PIDE query).
 * Interim goals of interrupted steps: after a proof step is interrupted at the time limit, `get_state` shows the goal state that its
-    method reaches after 200 ms (`interim_goal`, `interim_goal_after_ms`, `interim_loops`), computed like the `apply_inspect` tool,
+    method reaches after 200 ms (`interim_goal`, `interim_goal_time_ms`, `interim_loops`), computed like the `apply_inspect` tool,
     with a hint to call that tool for other times; if the method finishes or fails within that time, its resulting goal state or
     the state after its last step (`interim_goal_hint` says which). The new helper theory ml/PIDE_MCP_Apply_Inspect.thy holds the query and sets the
     limits of the `apply_inspect` command for theories that import it (`apply_inspect_timeout = 5000`,

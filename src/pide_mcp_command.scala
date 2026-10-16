@@ -443,8 +443,10 @@ object PIDE_MCP_Command {
           no_effect(doc).map("no_effect" -> _),
           interrupted_at.map("interrupted_at_limit_seconds" -> _),
           interrupted_at.map(_ => "hint" -> PIDE_MCP_Step_Limit.retry_note(source_line))) :::
-        interrupted_at.toList.flatMap(_ =>
-          PIDE_MCP_Step_Limit.interim(snapshot, cmd).toList.flatMap(_.interim_json(source_line, opts.goal_max_lines).toList.map(Some(_)))) :::
+        // after an interrupt, or while the step still runs (pide_mcp_interim_goal_after_ms)
+        Option.when(interrupted_at.nonEmpty || cmd_status.is_running)(())
+          .flatMap(_ => PIDE_MCP_Step_Limit.interim(snapshot, cmd)).toList
+          .flatMap(_.interim_json(source_line, opts.goal_max_lines).toList.map(Some(_))) :::
         List(
           interrupt_sent_seconds.map("interrupt_sent_seconds" -> _),
           Option.when(no_time_limit)("no_time_limit" -> true),

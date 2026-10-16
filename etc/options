@@ -26,3 +26,6 @@ option pide_mcp_output_format : string = "yaml" for pide_mcp
 
 option pide_mcp_step_time_limit : real = 5.0 for pide_mcp
   -- "time limit (seconds) for the real run of a proof step (apply, by, proof, qed, done, ., ..): a step that reaches it is interrupted and shown as canceled; retry_without_limit runs it again without the limit; 0: no limit"
+
+option pide_mcp_interim_goal_after_ms : int = 5000 for pide_mcp
+  -- "when a proof step has run this long (ms), its method runs again with apply_inspect for the interim goal shown by get_state, without interrupting the step (also when it is interrupted at pide_mcp_step_time_limit); 0: no interim goals"
