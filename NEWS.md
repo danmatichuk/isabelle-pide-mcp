@@ -13,6 +13,10 @@ New in this PIDE MCP version
     no longer listed or counted as commands.
 * `create_scratch` creates a `.thy` file by default and adds a missing leading dot to `extension` (before, it created a file without
     extension that PIDE could not load). An origin that is a file without extension gives a clear error instead of `Illegal character "/"`.
+* A proof step interrupted at the time limit whose evaluation has stopped but whose closing status never arrived (PIDE kept
+    showing it as running, and its time kept growing) is closed by the server: 2 s after the interrupt, if the prover confirms
+    that the evaluation has stopped (all its groups cancelled, no tasks left), the new helper theory ml/PIDE_MCP_Close.thy
+    (Pure, loaded in every session) sends the missing status, and the step shows as `canceled`.
 * New tool `apply_inspect`: runs a proof method on the goal before a proof step with apply_inspect (git submodule deps/apply_inspect),
     stops it after `after_ms` (default 200) and returns the goal state reached then (within a simp call the term it has rewritten to),
     the theorems used until then (without infrastructure) and loop warnings. The file is not changed (a PIDE query).

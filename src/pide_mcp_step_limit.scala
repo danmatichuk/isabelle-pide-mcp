@@ -6,6 +6,10 @@ A time limit for proof steps (pide_mcp_step_time_limit, default 5 s; 0: none): a
 evaluation of the command, an edit of it (a new command) or a re-evaluation has the limit again. Only the MCP's
 PIDE sessions are affected, not batch builds or the user's editor.
 
+Sometimes the interrupted evaluation stops, but its closing status never arrives and PIDE keeps showing the command
+as running: then the server sends that status itself (PIDE_MCP.close_exec of the helper theory
+ml/PIDE_MCP_Close.thy), once the prover confirms that the evaluation has stopped.
+
 After the interrupt, the step's method runs again on the goal before the step, like `apply_inspect` with the
 limits of the helper theory ml/PIDE_MCP_Apply_Inspect.thy (at most 5 s, goal states recorded from 200 ms on):
 `get_state` shows the first recorded goal state, the interim goal.
@@ -58,6 +62,10 @@ object PIDE_MCP_Step_Limit {
       "or replace the step by a cheaper one"
 
   /* interim goals: the goal state that the method of an interrupted step has reached after a moment (apply_inspect) */
+
+  val close_helper: String = "$PIDE_MCP_HOME/ml/PIDE_MCP_Close.thy"
+  val close_grace: Time = Time.seconds(2)
+  val close_horizon: Time = Time.seconds(120)
 
   val helper: String = "$PIDE_MCP_HOME/ml/PIDE_MCP_Apply_Inspect.thy"
   val helper_import: String = "\"$PIDE_MCP_HOME/ml/PIDE_MCP_Apply_Inspect\""
@@ -215,6 +223,10 @@ class PIDE_MCP_Step_Limit(session: PIDE_MCP_Session) {
   private val pending = Synchronized(List.empty[(Key, Command, String)])
   private val query_timeout = Time.seconds(30)
 
+  // interrupted steps whose closing status may still be missing: when interrupted, when last closed
+  private val stopping = Synchronized(Map.empty[Key, (Command, Document.Node.Name, Time, Time)])
+  private val close_state = Synchronized(Option.empty[Boolean])
+
   private val consumer =
     Session.Consumer[Session.Commands_Changed]("pide_mcp_step_limit") {
       case changed if active =>
@@ -255,6 +267,8 @@ class PIDE_MCP_Step_Limit(session: PIDE_MCP_Session) {
                     running_ms >= (limit * 1000).toLong) {
                   interrupt(k, limit)
                   cancel_command(session, snapshot, cmd, running_ms)
+                  val now = Time.now()
+                  stopping.change(_ + (k -> (cmd, node_name, now, now)))
                   for (m <- step_method(cmd) if helper_state.value != Some(false)) {
                     set_interim(k, Interim(m, "pending"))
                     pending.change(_ :+ (k, cmd, m))
@@ -264,37 +278,70 @@ class PIDE_MCP_Step_Limit(session: PIDE_MCP_Session) {
               case Exn.Exn(_) => running.change(_ - k)  // the node is gone (unloaded)
             }
           }
+          close_stopped()
           Time.seconds(0.2).sleep()
         }
       }
       ()
     })
 
+  /* An interrupted step that still shows as running after close_grace may have stopped without its closing status:
+     the helper's protocol command sends that status if the prover confirms that the evaluation has stopped (otherwise
+     nothing is sent), again every close_grace until the status ends or close_horizon has passed. */
+  private def close_stopped(): Unit =
+    if (close_state.value.contains(true)) {
+      val now = Time.now()
+      for ((k, (cmd, node_name, since, last)) <- stopping.value) {
+        val snapshot = Exn.result(session.node_snapshot(node_name)) match {
+          case Exn.Res(snapshot) => Some(snapshot)
+          case Exn.Exn(exn) if Exn.is_interrupt(exn) => throw exn
+          case Exn.Exn(_) => None
+        }
+        val still_running =
+          snapshot.exists(snapshot => PIDE_MCP_Step_Limit.key(snapshot, cmd).contains(k) &&
+            PIDE_MCP_Command.status(snapshot, cmd).is_running)
+        if (!still_running || now - since > close_horizon) stopping.change(_ - k)
+        else if (now - last >= close_grace) {
+          for (st <- snapshot.flatMap(_.state.lookup_id(k._2))) {
+            session.session.protocol_command_raw("PIDE_MCP.close_exec",
+              List(Bytes(k._2.toString), Bytes(st.document_status.runs.toString),
+                Bytes(st.document_status.forks.toString)))
+          }
+          stopping.change(_ + (k -> (cmd, node_name, since, now)))
+        }
+      }
+    }
+
   /* interim goals of interrupted steps, one after the other */
+
+  // load a helper theory of the server and wait until it is processed: whether it is ok
+  private def load_theory(path: String): Boolean =
+    Exn.result {
+      val progress = new Progress
+      val node_name = session.node_name(Path.explode(path).expand.implode)
+      val deadline = Time.now() + Time.seconds(300)
+      var snapshot = PIDE_MCP_Tool_Util.require_loaded_origin_snapshot(session, node_name, progress, 300)
+      def status = PIDE_MCP_Theory.Status.statuses(session, snapshot, List(node_name)).head.overall_status
+      while (active && status == Document_Status.Overall_Status.pending && Time.now() < deadline) {
+        Time.seconds(0.5).sleep()
+        snapshot = session.node_snapshot(node_name)
+      }
+      status == Document_Status.Overall_Status.ok
+    } match {
+      case Exn.Res(ok) => ok
+      case Exn.Exn(_) => false
+    }
 
   // the helper theory imports Main: only for sessions based on HOL (otherwise it would load all of HOL)
   lazy val helper_loaded: Boolean =
-    List("Main", "HOL.Main").exists(session.resources.loaded_theory) &&
-      (Exn.result {
-        val progress = new Progress
-        val node_name = session.node_name(Path.explode(helper).expand.implode)
-        val deadline = Time.now() + Time.seconds(300)
-        var snapshot = PIDE_MCP_Tool_Util.require_loaded_origin_snapshot(session, node_name, progress, 300)
-        def status = PIDE_MCP_Theory.Status.statuses(session, snapshot, List(node_name)).head.overall_status
-        while (active && status == Document_Status.Overall_Status.pending && Time.now() < deadline) {
-          Time.seconds(0.5).sleep()
-          snapshot = session.node_snapshot(node_name)
-        }
-        status == Document_Status.Overall_Status.ok
-      } match {
-        case Exn.Res(ok) => ok
-        case Exn.Exn(_) => false
-      })
+    List("Main", "HOL.Main").exists(session.resources.loaded_theory) && load_theory(helper)
 
   private val interim_worker =
     if (limit <= 0) None
     else Some(Isabelle_Thread.fork(name = s"pide_mcp_interim_goal_${session.id}", daemon = true) {
       Exn.result {
+        // the close helper (Pure) first, in every session
+        close_state.change(_ => Some(load_theory(close_helper)))
         // loaded eagerly: the first interrupt should not wait for Apply_Inspect to load
         val ok = helper_loaded
         helper_state.change(_ => Some(ok))
