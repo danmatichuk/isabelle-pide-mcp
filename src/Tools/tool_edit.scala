@@ -68,16 +68,17 @@ object Tool_Edit {
 
   /* New file content: lines that no edit touches keep their raw text from disk (byte for byte,
      e.g. literal Unicode symbols are not turned into \<...>); only lines touched by an edit are
-     rebuilt and symbol-encoded. `raw` and `decoded` are the old file text (line-normalised)
+     rebuilt and encoded (symbol-encoded for theory and ML files). `raw` and `decoded` are the old file text (line-normalised)
      before and after symbol decoding, `replacements` refer to `decoded`. */
   def merge_into_raw(
     raw: String,
     decoded: String,
-    replacements: List[(Text.Offset, Text.Offset, String)]
+    replacements: List[(Text.Offset, Text.Offset, String)],
+    encode: String => String = Symbol.encode
   ): String = {
     val raw_lines = raw.split("\n", -1)
     val line_starts = 0 :: decoded.indices.filter(decoded(_) == '\n').map(_ + 1).toList
-    if (raw_lines.length != line_starts.length) Symbol.encode(apply_replacements(decoded, replacements))
+    if (raw_lines.length != line_starts.length) encode(apply_replacements(decoded, replacements))
     else {
       def line_of(offset: Text.Offset): Int = line_starts.lastIndexWhere(_ <= offset)
       def line_end(line: Int): Int =
@@ -96,7 +97,7 @@ object Tool_Edit {
         val base = line_starts(first)
         val segment = decoded.substring(base, line_end(last))
         val shifted = rs.map { case (start, stop, text) => (start - base, stop - base, text) }
-        out ++= Symbol.encode(apply_replacements(segment, shifted))
+        out ++= encode(apply_replacements(segment, shifted))
         if (last + 1 < line_starts.length) out += '\n'
         next = last + 1
       }
@@ -159,7 +160,8 @@ object Tool_Edit {
       progress.expose_interrupt()
       val new_raw =
         if (changed) Some(merge_into_raw(Line.normalize(File.read(node_name.path)), current_text,
-          edit_replacements(mode, offsets, actual_old_text.length, new_text)))
+          edit_replacements(mode, offsets, actual_old_text.length, new_text),
+          PIDE_MCP_Util.encode_file_text(node_name.path, _)))
         else None
       // an ML file with a syntax error is not written: the reload of the file and all its dependents (minutes) would only report it
       val ml_result =
@@ -248,7 +250,7 @@ class Tool_Edit extends PIDE_MCP_Tool("edit") {
       val node_name = PIDE_MCP_Tool_Util.origin_param(session, args)
       val mode = mode_arg.get(args)
       val text = Line.normalize(text_arg.get(args))
-      val old_text = Symbol.decode(Line.normalize(old_text_arg.get(args)))
+      val old_text = PIDE_MCP_Util.decode_file_text(node_name.path, Line.normalize(old_text_arg.get(args)))
       val edit_all = edit_all_arg.get(args)
       val opt_start_line = PIDE_MCP_Tool_Schema.opt_start_line_arg.get(args)
       val opt_end_line = PIDE_MCP_Tool_Schema.opt_end_line_arg.get(args)

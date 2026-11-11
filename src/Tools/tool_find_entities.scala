@@ -7,7 +7,7 @@ package isabelle.pide.mcp
 import isabelle._
 
 class Tool_Find_Entities extends PIDE_MCP_Tool("find_entities") {
-  private val snippet_preview_lines: Int = 3
+  private val default_snippet_lines: Int = 3
 
   private val definition_kinds =
     List(Markup.AXIOM, Markup.FACT, Markup.DYNAMIC_FACT, Markup.LITERAL_FACT,
@@ -27,7 +27,7 @@ class Tool_Find_Entities extends PIDE_MCP_Tool("find_entities") {
   private val snippet_lines_arg = PIDE_MCP_Tool_Arg.int_default(
     "snippet_lines",
     "Lines per definition snippet (0: none).",
-    snippet_preview_lines, minimum = Some(0))
+    default_snippet_lines, minimum = Some(0))
   private val filter_origins_arg = PIDE_MCP_Tool_Arg.strings_default(
     "filter_origins",
     "Only entities defined in these origins.",

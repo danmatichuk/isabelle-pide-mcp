@@ -55,6 +55,9 @@ object PIDE_MCP_Util {
   def numbered_line(line: Int, text: String): String =
     s"${line}: ${text}"
 
+  def line_range(start_line: Int, end_line: Int): String =
+    if (start_line == end_line) start_line.toString else s"$start_line-$end_line"
+
   def numbered_lines(lines: IterableOnce[String], start_line: Int): String =
     lines.iterator.zipWithIndex.map { case (l, i) =>
       numbered_line(start_line + i, l) }.mkString("\n")
@@ -72,6 +75,15 @@ object PIDE_MCP_Util {
     process_result.print_rc + if_proper(process_result.err, s": ${process_result.err}")
 
   def path(s: String): Path = Path.explode(File.standard_path(s))
+
+  def uses_isabelle_encoding(path: Path): Boolean =
+    File.is_thy(path.file_name) || File.is_ML(path.file_name)
+
+  def decode_file_text(path: Path, text: String): String =
+    if (uses_isabelle_encoding(path)) Symbol.decode(text) else text
+
+  def encode_file_text(path: Path, text: String): String =
+    if (uses_isabelle_encoding(path)) Symbol.encode(text) else text
 
   def display_name(entry: Option[Name_Space.Entry], range: Text.Range, source: String): String =
     entry.map(_.name).filter(_.nonEmpty).getOrElse(range.substring(source))

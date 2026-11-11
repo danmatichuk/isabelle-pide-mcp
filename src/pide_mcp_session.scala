@@ -218,11 +218,13 @@ class PIDE_MCP_Session private(
 
   def node_name(s: String): Document.Node.Name = {
     // names that are no theory names (e.g. paths without extension) are resolved as files
-    val theory_node = Exn.result(resources.find_theory_node(s)) match {
-      case Exn.Res(node) => node
-      case Exn.Exn(exn) if Exn.is_interrupt(exn) => throw exn
-      case Exn.Exn(_) => None
-    }
+    val theory_node =
+      if (!Url.is_base_name(s)) None
+      else Exn.result(resources.find_theory_node(s)) match {
+        case Exn.Res(node) => node
+        case Exn.Exn(exn) if Exn.is_interrupt(exn) => throw exn
+        case Exn.Exn(_) => None
+      }
     theory_node.getOrElse(path_node_name(PIDE_MCP_Util.path(s)))
   }
 
@@ -281,10 +283,10 @@ class PIDE_MCP_Session private(
 
   def read_file_content(node_name: Document.Node.Name): String =
     resources.make_theory_content(node_name).getOrElse(
-      Symbol.decode(Line.normalize(File.read(node_name.path))))
+      PIDE_MCP_Util.decode_file_text(node_name.path, Line.normalize(File.read(node_name.path))))
 
   def write_file_content(path: Path, text: String): Unit =
-    File.write(path, Symbol.encode(Line.normalize(text)))
+    File.write(path, PIDE_MCP_Util.encode_file_text(path, Line.normalize(text)))
 
   // text that is already in its on-disk (symbol-encoded) form
   def write_file_text(path: Path, text: String): Unit =
